@@ -1,0 +1,24 @@
+# colcon (si le repo est clone a la racine d'un workspace)
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Rosbags : heberges hors du repo (ENF-05, section 12)
+*.db3
+*.mcap
+rosbag*/
+bags/
+
+# Poids des modeles (telecharges par Ultralytics)
+*.pt
+*.onnx
+
+# Videos et PDF generes : hors du depot (gardes dans ~/Documents/project cv)
+*.mp4
+*.webm
+docs/*.pdf
