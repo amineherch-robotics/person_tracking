@@ -1,0 +1,12 @@
+# ByteTrack pour suivre une personne choisie, meme si quelqu'un passe devant elle.
+# Copie de ultralytics/cfg/trackers/bytetrack.yaml ; seul track_buffer change.
+tracker_type: bytetrack
+track_high_thresh: 0.25   # 1re passe d'association : detections sures
+track_low_thresh: 0.1     # 2e passe : detections peu sures (personne a moitie cachee)
+new_track_thresh: 0.25    # score minimal pour creer une nouvelle piste
+# Nombre d'images pendant lesquelles une piste cachee est gardee (position predite par le filtre de Kalman)
+# avant d'etre supprimee. Ultralytics compte a 30 images/s, or YOLO tourne a ~10 images/s sur le CPU :
+# 30 (defaut) = ~3 s reelles ; 90 = ~9 s, assez pour qu'une personne finisse de passer devant la cible.
+track_buffer: 90
+match_thresh: 0.8         # seuil d'association (IoU) entre prediction et detection
+fuse_score: True          # combine IoU et score de detection pour associer

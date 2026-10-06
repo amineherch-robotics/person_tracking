@@ -8,3 +8,4 @@ float32 vy
 uint32 age                         # nombre d'images depuis la creation de la piste
 uint32 frames_since_update         # images sans detection associee (> 0 : prediction seule, EF-04)
 bool confirmed                     # piste confirmee (assez de detections successives)
+string color                       # couleur dominante des vetements (haut du corps), ex. "rouge" ; vide si inconnue

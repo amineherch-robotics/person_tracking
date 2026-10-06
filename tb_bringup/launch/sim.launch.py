@@ -13,6 +13,8 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
+from tb_bringup.actor_skins import ensure_skins
+
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('tb_bringup')
@@ -45,7 +47,11 @@ def generate_launch_description():
         DeclareLaunchArgument('yaw', default_value='0.0'),
     ]
 
+    # Personnes de couleurs differentes : copies recolorees du modele Fuel, creees si absentes
+    actor_models = ensure_skins()
+
     resource_paths = [
+        AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', actor_models),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', tb3_models),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(pkg_share, 'models')),
     ]

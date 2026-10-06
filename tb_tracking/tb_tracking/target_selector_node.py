@@ -1,8 +1,10 @@
 """target_selector_node : /detections ou /tracks -> /target (tb_interfaces/TargetState).
 
 input: detections (balle) : la cible est la detection de meilleur score dans chaque image.
-input: tracks (personnes suivies) : on verrouille un identifiant de piste et on le garde (EF-05),
-avec re-acquisition apres lost_timeout (voir target_lock.py).
+input: tracks (personnes suivies) : on verrouille un identifiant de piste et on le garde (EF-05).
+  selection: auto   -> la personne la plus proche du centre, re-acquisition apres lost_timeout ;
+  selection: manual -> l'utilisateur choisit l'ID sur /target/select (std_msgs/Int32, -1 = arreter),
+                       par exemple avec la fenetre `ros2 run tb_bringup target_chooser`.
 Distance : 'bbox' (hauteur connue de l'objet, ex. la balle) ou 'lidar' (rayons du /scan dans la direction
 de la cible, EF-09 : pour une personne, coupee par le haut de l'image, la hauteur de la bbox est inutilisable).
 Phase 3 : l'entree deviendra /tracks et la cible sera verrouillee sur un id (EF-05).
@@ -15,6 +17,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, LaserScan
+from std_msgs.msg import Int32
 from vision_msgs.msg import Detection2DArray
 
 from tb_interfaces.msg import TargetState, TrackArray
@@ -29,6 +32,9 @@ class TargetSelectorNode(Node):
         camera_info_topic = self.declare_parameter('camera_info_topic', '/camera/camera_info').value
         self.object_height = self.declare_parameter('object_height', 0.067).value
         self.distance_method = self.declare_parameter('distance_method', 'bbox').value
+        # lidar : hauteur connue de l'objet en repli, si le LiDAR ne voit rien (personne au-dela de sa portee
+        # de 3,5 m) et que la bbox n'est pas coupee par le haut de l'image. 0 = pas de repli.
+        self.fallback_height = self.declare_parameter('fallback_object_height', 0.0).value
         scan_topic = self.declare_parameter('scan_topic', '/scan').value
         self.scan_max_age = self.declare_parameter('scan_max_age', 0.5).value
         # Secteur LiDAR : une fraction de la largeur angulaire de la bbox (le centre du corps), bornee
@@ -36,9 +42,10 @@ class TargetSelectorNode(Node):
         self.sector_min = math.radians(self.declare_parameter('lidar_sector_min_deg', 1.5).value)
         self.lost_timeout = self.declare_parameter('lost_timeout', 2.0).value
         # Repli si camera_info absent ou non calibre (K nul, cas frequent avec usb_cam)
+        self.image_height = self.declare_parameter('image_height', 480).value
         self.intrinsics = intrinsics_from_hfov(
             self.declare_parameter('image_width', 640).value,
-            self.declare_parameter('image_height', 480).value,
+            self.image_height,
             self.declare_parameter('camera_hfov', 1.2217).value,
         )
         self.has_camera_info = False
@@ -50,9 +57,16 @@ class TargetSelectorNode(Node):
         self.pub = self.create_publisher(TargetState, 'target', 10)
         source = self.declare_parameter('input', 'detections').value
         if source == 'tracks':
-            self.lock = TargetLock(self.lost_timeout)
+            selection = self.declare_parameter('selection', 'auto').value
+            if selection not in ('auto', 'manual'):
+                raise ValueError(f"selection inconnue : '{selection}' (auto ou manual)")
+            self.lock = TargetLock(self.lost_timeout, auto_select=selection == 'auto')
             self.locked_id = None
+            self.reid_logged = 0
             self.create_subscription(TrackArray, 'tracks', self.on_tracks, 10)
+            self.create_subscription(Int32, 'target/select', self.on_select, 10)
+            if selection == 'manual':
+                self.get_logger().info('Selection manuelle : en attente du choix d\'un ID sur /target/select')
         elif source == 'detections':
             self.create_subscription(Detection2DArray, 'detections', self.on_detections, 10)
         else:
@@ -89,15 +103,27 @@ class TargetSelectorNode(Node):
         if self.distance_method == 'lidar':
             target.distance = self.lidar_distance(target.bearing, bbox.size_x, fx, stamp)
             target.distance_source = TargetState.DISTANCE_LIDAR
+            top = bbox.center.position.y - bbox.size_y / 2.0
+            if math.isnan(target.distance) and self.fallback_height > 0.0 and top > 0.05 * self.image_height:
+                target.distance = distance_from_height(bbox.size_y, fy, self.fallback_height)
+                target.distance_source = TargetState.DISTANCE_BBOX
         else:
             target.distance = distance_from_height(bbox.size_y, fy, self.object_height)
             target.distance_source = TargetState.DISTANCE_BBOX
+
+    def on_select(self, msg):
+        self.lock.select(msg.data, self.get_clock().now().nanoseconds * 1e-9)
+        self.locked_id = None
+        if msg.data < 0:
+            self.get_logger().info('Suivi arrete par l\'utilisateur')
+        else:
+            self.get_logger().info(f'Utilisateur : suivre l\'ID {msg.data}')
 
     def on_tracks(self, msg):
         fx, fy, cx, _ = self.intrinsics
         stamp = Time.from_msg(msg.header.stamp)
         observations = [TrackObs(tr.id, tr.bbox.center.position.x, tr.bbox.center.position.y,
-                                 tr.bbox.size_x, tr.bbox.size_y) for tr in msg.tracks]
+                                 tr.bbox.size_x, tr.bbox.size_y, tr.color) for tr in msg.tracks]
         state, obs, elapsed = self.lock.update(observations, stamp.nanoseconds * 1e-9, cx)
 
         target = TargetState()
@@ -113,6 +139,10 @@ class TargetSelectorNode(Node):
             else:
                 target.bearing = bearing(obs.cx, cx, fx)  # derniere direction connue
         if state == LOCKED and obs.id != self.locked_id:
+            if self.lock.reid_count != self.reid_logged:
+                self.reid_logged = self.lock.reid_count
+                self.get_logger().info(f'Cible re-identifiee par ses vetements ({self.lock.target_color}) : '
+                                       f'ID {self.locked_id} -> ID {obs.id}')
             self.get_logger().info(f'Cible verrouillee : ID {obs.id} (verrouillage n {self.lock.lock_count})')
             self.locked_id = obs.id
         if math.isnan(target.distance):

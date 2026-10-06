@@ -6,6 +6,8 @@ chaque personne garde un identifiant stable, publie dans Detection2D.id et sur /
 Le header de l'image d'origine est recopie tel quel (ENF-01).
 """
 
+from collections import deque
+import os
 import time
 
 from cv_bridge import CvBridge
@@ -19,6 +21,7 @@ from sensor_msgs.msg import CompressedImage, Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
 from tb_interfaces.msg import Track, TrackArray
+from tb_perception.clothing_color import clothing_color
 from tb_perception.color_detector import ColorDetector
 
 # File d'attente de 1 image : si le detecteur est plus lent que la camera, il traite toujours
@@ -58,7 +61,7 @@ class DetectorNode(Node):
                 device=self.declare_parameter('device', 'cpu').value,
                 max_detections=self.declare_parameter('max_detections', 10).value,
                 num_threads=self.declare_parameter('num_threads', 3).value,
-                tracker=self.declare_parameter('tracker', '').value,
+                tracker=self.tracker_path(),
                 track_conf=self.declare_parameter('track_conf', 0.1).value,
             )
         else:
@@ -73,6 +76,7 @@ class DetectorNode(Node):
         if self.tracking:
             self.tracks_pub = self.create_publisher(TrackArray, 'tracks', 10)
             self.track_memory = {}  # id -> (cx, cy, temps, age) pour la vitesse et l'age des pistes
+            self.track_colors = {}  # id -> dernieres couleurs de vetements estimees (vote majoritaire)
             self.get_logger().info(f'Suivi multi-objets : {self.detector.tracker}')
 
         if transport == 'compressed':
@@ -82,6 +86,15 @@ class DetectorNode(Node):
         else:
             self.create_subscription(Image, image_topic, self.on_image, LATEST_IMAGE_QOS)
             self.get_logger().info(f'Ecoute {image_topic}, backend {backend}')
+
+    def tracker_path(self):
+        """Fichier de config du tracker : cherche d'abord dans tracker_dir (configs du projet, passe par le
+        launch), sinon nom d'une config fournie par Ultralytics (bytetrack.yaml, botsort.yaml)."""
+        tracker = self.declare_parameter('tracker', '').value
+        tracker_dir = self.declare_parameter('tracker_dir', '').value
+        if tracker and tracker_dir and os.path.isfile(os.path.join(tracker_dir, tracker)):
+            return os.path.join(tracker_dir, tracker)
+        return tracker
 
     def on_image(self, msg):
         self.process(self.bridge.imgmsg_to_cv2(msg, 'bgr8'), msg.header)
@@ -114,7 +127,7 @@ class DetectorNode(Node):
             out.detections.append(d)
         self.pub.publish(out)
         if self.tracking:
-            self.publish_tracks(detections, header)
+            self.publish_tracks(detections, header, image)
 
         if self.publish_debug and self.debug_pub.get_subscription_count() > 0:
             for det in detections:
@@ -128,7 +141,7 @@ class DetectorNode(Node):
             debug.header = header
             self.debug_pub.publish(debug)
 
-    def publish_tracks(self, detections, header):
+    def publish_tracks(self, detections, header, image):
         now = Time.from_msg(header.stamp).nanoseconds * 1e-9
         msg = TrackArray()
         msg.header = header
@@ -156,9 +169,25 @@ class DetectorNode(Node):
             track.age = age
             track.frames_since_update = 0
             track.confirmed = True  # Ultralytics ne publie que les pistes confirmees
+            # Couleur des vetements, stabilisee par un vote sur les 15 dernieres images de la piste.
+            # Pas de vote si la bbox touche (a 5 % pres) le haut de l'image : le haut du corps est coupe
+            # (de pres, la camera basse ne voit que les jambes, on lirait la couleur du jean).
+            # Repli tant qu'aucune vue complete n'existe : le haut de la partie visible (0-25 %), qui est la
+            # poitrine quand la personne est coupee au cou.
+            votes = self.track_colors.setdefault(det.track_id, (deque(maxlen=15), deque(maxlen=15)))
+            if det.cy - det.h / 2.0 > 0.05 * image.shape[0]:
+                vote_list, band = votes[0], (0.15, 0.45)
+            else:
+                vote_list, band = votes[1], (0.0, 0.25)
+            color = clothing_color(image, det.cx, det.cy, det.w, det.h, band=band)
+            if color:
+                vote_list.append(color)
+            best = votes[0] or votes[1]
+            track.color = max(set(best), key=best.count) if best else ''
             msg.tracks.append(track)
         # Oublier les pistes absentes depuis plus de 10 s
         self.track_memory = {k: v for k, v in self.track_memory.items() if k in seen or now - v[2] < 10.0}
+        self.track_colors = {k: v for k, v in self.track_colors.items() if k in self.track_memory}
         self.tracks_pub.publish(msg)
 
     def report_speed(self):

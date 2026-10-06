@@ -12,17 +12,22 @@ detector_node:
     device: cpu               # pas de pilote NVIDIA sur le laptop ; 'cuda:0' sinon
     num_threads: 3            # CPU : 3 threads = 95 ms/image stable avec Gazebo (4 : instable, jusqu'a 300 ms)
     max_detections: 10
-    # Suivi multi-objets (partie 2) : '' pour la detection seule, bytetrack.yaml ou botsort.yaml
-    tracker: bytetrack.yaml
+    # Suivi multi-objets (partie 2) : '' pour la detection seule, bytetrack.yaml ou botsort.yaml (Ultralytics),
+    # ou une config du dossier config/ : bytetrack_person.yaml garde les pistes cachees plus longtemps
+    tracker: bytetrack_person.yaml
     track_conf: 0.1           # ByteTrack utilise aussi les detections peu sures (2e passe d'association)
 
 target_selector_node:
   ros__parameters:
     input: tracks             # verrouille un ID de piste (EF-05) ; 'detections' : meilleure detection
+    selection: manual         # l'utilisateur choisit l'ID (fenetre target_chooser) ; auto : la plus proche du centre
     # La personne est coupee par le haut de l'image : la hauteur de la bbox ne donne pas la distance.
     # On prend les rayons du LiDAR dans la direction de la personne (fusion camera-LiDAR, EF-09).
     distance_method: lidar
+    fallback_object_height: 1.75  # m : au-dela de la portee du LiDAR (3,5 m), distance par la hauteur de la
+                                  # bbox si la personne est vue en entier (taille moyenne d'un adulte)
     lidar_sector_fraction: 0.25   # centre de la bbox (le tronc, les jambes)
     lidar_sector_min_deg: 1.5
     scan_max_age: 0.5             # s
-    lost_timeout: 2.0         # s : au-dela, le verrou est relache et une nouvelle cible est choisie
+    lost_timeout: 2.0         # s : LOST puis SEARCHING ; en manuel l'ID choisi est garde, et la cible est
+                              # re-identifiee par la couleur de ses vetements si elle revient sous un autre ID

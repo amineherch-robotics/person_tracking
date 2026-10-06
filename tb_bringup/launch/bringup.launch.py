@@ -46,9 +46,19 @@ def generate_launch_description():
         package='tb_bringup', executable='ball_joystick', output='screen',
         condition=IfCondition(PythonExpression(["'", mode, "' == 'sim' and '", joystick, "' == 'true'"])))
 
+    chooser = LaunchConfiguration('chooser')
+    declare_chooser = DeclareLaunchArgument(
+        'chooser', default_value='true',
+        description='target:=person : ouvrir la fenetre de choix de la personne a suivre')
+    # En reel, la fenetre lit l'image compressee (WiFi) ; les parametres image_* viennent de <mode>.yaml
+    target_chooser = Node(
+        package='tb_bringup', executable='target_chooser', output='screen', parameters=[params_file],
+        condition=IfCondition(PythonExpression(["'", target, "' == 'person' and '", chooser, "' == 'true'"])))
+
     pipeline_nodes = [
         Node(package='tb_perception', executable='detector_node',
-             parameters=[params_file, target_file], output='screen', condition=IfCondition(pipeline),
+             parameters=[params_file, target_file, {'tracker_dir': os.path.join(pkg_share, 'config')}],
+             output='screen', condition=IfCondition(pipeline),
              # Bibliotheques de calcul limitees a 1 thread chacune (sinon une par coeur : 490 % CPU mesures,
              # Gazebo ralenti a 0,24x le temps reel) ; PyTorch est regle par le parametre num_threads.
              additional_env={'OMP_NUM_THREADS': '1', 'OPENBLAS_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'}),
@@ -71,7 +81,7 @@ def generate_launch_description():
         image = '/camera/image_raw' if sim_mode else '/image_raw'
         camera_info = '/camera/camera_info' if sim_mode else '/camera_info'
         topics = [image + '/compressed', camera_info, '/scan', '/odom', '/tf', '/tf_static',
-                  '/detections', '/target', '/cmd_vel', '/follower/enable']
+                  '/detections', '/tracks', '/target', '/target/select', '/cmd_vel', '/follower/enable']
         if sim_mode:
             topics += ['/ball/cmd_vel']  # pas /clock : 'ros2 bag play --clock' la regenere
         name = f"{mode.perform(context)}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
@@ -100,6 +110,7 @@ def generate_launch_description():
         declare_gui,
         declare_pipeline,
         declare_target,
+        declare_chooser,
         declare_joystick,
         declare_record,
         declare_bag_dir,
@@ -107,5 +118,6 @@ def generate_launch_description():
         sim,
         real_info,
         ball_joystick,
+        target_chooser,
         OpaqueFunction(function=start_recording),
     ] + pipeline_nodes)

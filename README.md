@@ -1,23 +1,23 @@
 # Person Tracking avec TurtleBot3 sous ROS2
 
 Un TurtleBot3 Burger détecte, identifie et suit une personne à ~1 m, en simulation (Gazebo) puis sur robot réel.
-Chaîne : webcam → détection YOLO → tracker SORT codé from scratch → sélection de cible → asservissement visuel.
+Chaîne : webcam → détection YOLO26n → suivi multi-personnes ByteTrack (un ID et une couleur de vêtements par personne) → choix de la personne par l'utilisateur → angle (caméra) et distance (LiDAR) → asservissement visuel.
 
-![Démo Phase 1 : le robot suit la balle de tennis déplacée au joystick](docs/img/demo_phase1.gif)
+![Démo : le robot suit la personne choisie, même quand d'autres passent devant](docs/img/demo_partie2_occlusion.gif)
 
-*Simulation Gazebo (×2) : la balle est déplacée au joystick à l'écran, le robot la suit. En haut à droite, l'image de la caméra du robot.*
+*Simulation Gazebo (×2), fenêtre de choix : la cible est la personne verte (ID 3) ; la rouge passe devant la caméra, la violette croise la cible ; l'ID 3 reste la cible.*
 
-> État : **Phase 1 (pipeline minimal) en simulation** : le robot suit une balle de tennis (détection couleur HSV, contrôleur P, watchdog). Test sur robot réel à venir.
+> État : **en simulation**, le robot détecte les personnes, leur donne un ID et une couleur de vêtements ; l'utilisateur clique sur celle à suivre ; la cible est retrouvée par sa couleur si elle revient sous un autre ID. Le robot suit aussi une balle de tennis (`target:=ball`, Phase 1). Test sur robot réel à venir.
 
 ## Packages
 
 | Package | Type | Contenu |
 |---|---|---|
 | `tb_interfaces` | ament_cmake | Messages `Track`, `TrackArray`, `TargetState` |
-| `tb_perception` | ament_python | `detector_node` (backends YOLO et couleur HSV) |
-| `tb_tracking` | ament_python | `tracker_node`, `target_selector_node`, lib SORT sans dépendance ROS |
-| `tb_control` | ament_python | `follower_controller`, watchdog |
-| `tb_bringup` | ament_python | Launch files, `config/sim.yaml` / `real.yaml`, monde Gazebo, modèle `tb3_burger_cam` |
+| `tb_perception` | ament_python | `detector_node` : YOLO26n + ByteTrack (Ultralytics) ou couleur HSV ; couleur des vêtements par ID |
+| `tb_tracking` | ament_python | `target_selector_node` ; libs sans ROS : verrouillage et ré-identification (`target_lock.py`), géométrie (`target_geometry.py`) |
+| `tb_control` | ament_python | `follower_controller` (contrôleur P, watchdog, limites), `estop_keyboard` |
+| `tb_bringup` | ament_python | Launch files, configs, monde Gazebo, modèle `tb3_burger_cam`, fenêtre `target_chooser`, joystick de la balle |
 
 Architecture et topics : [docs/architecture.md](docs/architecture.md). Suivi du projet : [docs/rapport_avancement.md](docs/rapport_avancement.md).
 
@@ -25,7 +25,14 @@ Architecture et topics : [docs/architecture.md](docs/architecture.md). Suivi du 
 
 - Ubuntu 24.04, ROS2 Jazzy, Gazebo Harmonic (`ros-jazzy-ros-gz`)
 - Paquets TurtleBot3 (`DynamixelSDK`, `turtlebot3`, `turtlebot3_msgs`, `turtlebot3_simulations`, **branche `jazzy`**) dans le même workspace
-- `ros-jazzy-vision-msgs`, `ros-jazzy-cv-bridge`
+- `ros-jazzy-vision-msgs`, `ros-jazzy-cv-bridge`, `python3-pil.imagetk` (fenêtre de choix)
+- Pour les personnes (YOLO) : PyTorch CPU et Ultralytics dans `~/.local`, sans casser le NumPy de ROS :
+  ```bash
+  pip install --user --break-system-packages torch torchvision --index-url https://download.pytorch.org/whl/cpu
+  pip install --user --break-system-packages --no-deps ultralytics ultralytics-thop
+  pip install --user --break-system-packages numpy==1.26.4 lap
+  ```
+  Le modèle `yolo26n.pt` est téléchargé au premier lancement dans `~/.cache/person_tracking`.
 - Connexion internet au premier lancement (le modèle de la personne est téléchargé depuis Gazebo Fuel)
 
 ## Installation
@@ -53,12 +60,25 @@ ros2 run rqt_image_view rqt_image_view /camera/image_raw
 
 `mode:=real` : voir la section [Robot réel](#robot-réel).
 
-`bringup.launch.py` lance aussi la chaîne `detector_node` → `target_selector_node` → `follower_controller` (désactivable avec `pipeline:=false`). Les paramètres de chaque node sont dans `tb_bringup/config/sim.yaml` et `real.yaml`.
+`bringup.launch.py` lance aussi la chaîne `detector_node` → `target_selector_node` → `follower_controller` (désactivable avec `pipeline:=false`). Les paramètres communs sont dans `tb_bringup/config/sim.yaml` et `real.yaml`, ceux de la cible dans `target_person.yaml` ou `target_ball.yaml` (argument `target:=`).
+
+## Suivre une personne choisie
+
+```bash
+ros2 launch tb_bringup bringup.launch.py mode:=sim            # target:=person par défaut
+```
+
+Une fenêtre **« Choisir la personne a suivre »** s'ouvre : chaque personne détectée y apparaît avec son ID et la couleur de ses vêtements. **Cliquer sur une personne** (ou sur son bouton) pour que le robot la suive ; « Arreter le suivi » pour arrêter. Tant que personne n'est choisi, le robot ne bouge pas.
+
+- Sans la fenêtre : `chooser:=false`, puis `ros2 topic pub --once /target/select std_msgs/msg/Int32 "{data: 3}"` (−1 = arrêter).
+- Si la cible est cachée et revient avec un autre ID, elle est retrouvée par la couleur de ses vêtements (log `Cible re-identifiee par ses vetements`).
+- Distance : LiDAR jusqu'à 3,5 m ; au-delà, hauteur de la silhouette.
+- Monde : pièce de 18 × 14 m, trois personnes (pulls rouge, vert, violet) qui marchent entre 4 et 12 m du robot.
 
 ## Phase 1 : suivre une balle de tennis
 
 ```bash
-ros2 launch tb_bringup bringup.launch.py mode:=sim
+ros2 launch tb_bringup bringup.launch.py mode:=sim target:=ball
 ```
 
 Le robot se tourne vers la balle de tennis (jaune-vert, 6,7 cm) et s'arrête à 1 m.
@@ -66,7 +86,7 @@ Le robot se tourne vers la balle de tennis (jaune-vert, 6,7 cm) et s'arrête à 
 **Déplacer la balle avec le joystick à l'écran** (souris ou flèches du clavier) :
 
 ```bash
-ros2 launch tb_bringup bringup.launch.py mode:=sim joystick:=true
+ros2 launch tb_bringup bringup.launch.py mode:=sim target:=ball joystick:=true
 # ou, simulation déjà lancée :
 ros2 run tb_bringup ball_joystick
 ```
@@ -114,7 +134,7 @@ ros2 launch tb_bringup bringup.launch.py mode:=sim record:=true     # -> ~/rosba
 ros2 bag info ~/rosbags/sim_<date>
 ```
 
-Sont enregistrés : l'image compressée, `camera_info`, `/scan`, `/odom`, `/tf`, `/detections`, `/target`, `/cmd_vel`, `/follower/enable`. Environ 0,7 Mo/s. Les rosbags sont exclus du dépôt git.
+Sont enregistrés : l'image compressée, `camera_info`, `/scan`, `/odom`, `/tf`, `/detections`, `/tracks`, `/target`, `/target/select`, `/cmd_vel`, `/follower/enable`. Environ 0,7 Mo/s. Les rosbags sont exclus du dépôt git.
 
 Rejouer les images pour tester un détecteur sans robot ni simulation :
 
@@ -156,7 +176,7 @@ Pour que la latence affichée soit juste, les horloges du robot et du laptop doi
 
 ```bash
 cd ~/turtlebot3_ws/src/person_tracking
-for p in tb_perception tb_tracking tb_control; do (cd $p && python3 -m pytest -q test); done
+for p in tb_perception tb_tracking tb_control tb_bringup; do (cd $p && python3 -m pytest -q test); done   # 42 tests
 ```
 
 ## Rapport
@@ -170,8 +190,8 @@ python3 docs/build_pdf.py              # -> docs/rapport_avancement.pdf (Chrome 
 
 ## Simulation
 
-- **Robot** : `tb3_burger_cam`, dérivé de `turtlebot3_burger_cam` (ROBOTIS). La caméra fisheye 182° d'origine est remplacée par une caméra standard proche d'une webcam USB : 640×480, FOV horizontal 70°, 30 Hz, bruit gaussien. Frame : `camera_rgb_optical_frame`.
-- **Monde** : `person_world.sdf`, pièce 10 × 8 m, deux obstacles, une personne (actor) qui marche en boucle sur un rectangle à 2.5–3.5 m devant le robot.
+- **Robot** : `tb3_burger_cam`, dérivé de `turtlebot3_burger_cam` (ROBOTIS). La caméra fisheye 182° d'origine est remplacée par une caméra standard proche d'une webcam USB : 640×480, FOV horizontal 70°, 30 Hz, bruit gaussien. Elle est montée **en haut du robot** (26 cm du sol, au-dessus du LiDAR, sur un mât). Frame : `camera_rgb_optical_frame`.
+- **Monde** : `person_world.sdf`, pièce 18 × 14 m, deux obstacles, trois personnes (actors, pulls rouge / vert / violet, modèle Gazebo Fuel `Mingfei/actor`, CC BY 4.0) qui marchent en boucle entre 4 et 12 m du robot.
 
 | Topic | Type | Source |
 |---|---|---|
@@ -181,6 +201,8 @@ python3 docs/build_pdf.py              # -> docs/rapport_avancement.pdf (Chrome 
 | `/odom`, `/tf`, `/joint_states`, `/imu` | | diff drive, IMU |
 | `/cmd_vel` | `geometry_msgs/TwistStamped` | commande (subscriber) |
 
-Monde : une balle de tennis statique (`tennis_ball`, 6,7 cm, jaune-vert) est posée en (2.0, 0.6) pour la Phase 1.
+Monde : une balle de tennis (`tennis_ball`, 6,7 cm, jaune-vert) est posée en (2.0, 0.6) pour la Phase 1 ; elle se déplace au joystick.
+
+Vidéos de démonstration (hors dépôt) : suivi de la balle au joystick (Phase 1), choix d'une personne et ré-identification, passages devant la cible.
 
 La fenêtre Gazebo utilise `tb_bringup/config/gz_gui.config` : l'image de la caméra et les rayons du LiDAR (`/scan`) sont affichés d'office dans le panneau de droite.

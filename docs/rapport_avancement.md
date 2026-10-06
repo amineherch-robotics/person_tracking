@@ -6,7 +6,7 @@ Pour comprendre comment fonctionne ce qui a été construit : **annexes pédagog
 
 Sections : 1. Présentation et plan · 2. État d'avancement · 3. Journal · 4. Problèmes et solutions · 5. Points ouverts · 6. Prochaines étapes · Annexes A à E.
 
-**Dernière mise à jour :** 6 octobre 2026 · **Phase en cours :** détection (YOLO) et suivi multi-personnes (Ultralytics) fonctionnent en simulation ; test réel de la Phase 1 en attente
+**Dernière mise à jour :** 6 octobre 2026 (soir) · **Phase en cours :** en simulation, le robot détecte les personnes (YOLO), leur donne un ID et une couleur de vêtements, l'utilisateur choisit qui suivre, et la cible est retrouvée après une occlusion ; test réel de la Phase 1 en attente
 
 ## 1. Présentation du projet et plan suivi
 
@@ -26,7 +26,8 @@ Sections : 1. Présentation et plan · 2. État d'avancement · 3. Journal · 4.
 | Logiciel | ROS 2 Jazzy, Python, OpenCV |
 | Simulation | Gazebo Harmonic |
 | Détection | Couleur (HSV) en Phase 1, puis YOLO26n (réseau de neurones) en Phase 2 |
-| Tracking | SORT codé soi-même (filtre de Kalman + algorithme hongrois) |
+| Tracking | Prévu : SORT codé soi-même. Réalisé : ByteTrack (Ultralytics) + verrouillage d'un ID + ré-identification par la couleur des vêtements |
+| Choix de la cible | Fenêtre `target_chooser` : l'utilisateur clique sur la personne à suivre |
 | Commande | Contrôleur P, puis PI, avec limites de sécurité |
 
 ### 1.2 L'architecture
@@ -65,10 +66,10 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | 0 · Fondations | ✅ Cahier des charges corrigé, 5 packages, messages, robot avec webcam, monde avec personne, lancement `mode:=sim/real` | Le modèle `burger_cam` existait déjà chez ROBOTIS : il a été adapté (caméra standard au lieu du fisheye) au lieu d'être créé |
 | 1 · Pipeline minimal | ⏳ Simulation validée : détection, sélection, contrôleur P, watchdog, arrêt d'urgence, 16 tests ; balle pilotable au joystick | Balle de tennis au lieu d'une balle rouge (plus facile à trouver pour le test réel) ; joystick ajouté pour tester une cible mobile ; **test réel et rosbags pas encore faits** |
 | 2 · Détection YOLO | ✅ en simulation | Le projet est réorganisé en **deux parties** : (1) détection des personnes avec YOLO, (2) suivi multi-objets avec le tracker intégré d'Ultralytics. La distance vient du LiDAR, la personne étant coupée par le haut de l'image |
-| 3 · Tracking | ⏳ | **Écart au cahier des charges** : le suivi utilise ByteTrack (Ultralytics) au lieu d'un SORT codé soi-même. SORT reste possible plus tard, pour comparer |
+| 3 · Tracking | ⏳ Suivi ByteTrack, couleur des vêtements par ID, choix de la personne par l'utilisateur, ré-identification après occlusion, en simulation | **Écart au cahier des charges** : le suivi utilise ByteTrack (Ultralytics) au lieu d'un SORT codé soi-même. SORT reste possible plus tard, pour comparer. **Ajouté** (demande en cours de projet) : l'utilisateur choisit la personne au lieu d'une sélection automatique ; la ré-identification (prévue en Phase 4) est avancée, en version simple (couleur) |
 | 4 et 5 | ⬜ | — |
 
-**Décisions en attente** : hauteur et inclinaison de la caméra (devenue bloquante, voir section 5), autoriser un léger recul.
+**Décision prise** : la caméra est montée **en haut du robot** (26 cm du sol, au-dessus du LiDAR, sur un mât). **Décisions en attente** : autoriser un léger recul (devenu important : une personne qui avance vers le robot finit trop près, voir section 5).
 
 ## 2. État d'avancement
 
@@ -77,7 +78,7 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | 0 · Fondations | S1 | Cahier des charges, architecture, simulation Gazebo + caméra | ✅ Terminée |
 | 1 · Pipeline minimal | S2 | Détection couleur, contrôleur P, watchdog, premier test réel, rosbags | ⏳ Simulation validée ; outils du réel prêts (webcam, réglage HSV, rosbags) ; test réel à faire |
 | 2 · Détection YOLO | S3 | YOLO dans ROS2, mesure des FPS en sim et sur rosbags | ✅ En simulation (YOLO26n, 11 images/s avec le suivi) |
-| 3 · Tracking | S4–S6 | Suivi multi-objets, sélection et verrouillage de la cible | ⏳ Suivi Ultralytics (ByteTrack) + verrouillage d'un ID en simulation ; SORT codé soi-même non fait |
+| 3 · Tracking | S4–S6 | Suivi multi-objets, sélection et verrouillage de la cible | ⏳ En simulation : ByteTrack, couleur des vêtements par ID, choix de la personne à la souris, ré-identification par la couleur ; SORT codé soi-même non fait |
 | 4 · Réel et robustesse | S7–S8 | Commande avancée, calibration, occlusions, ré-ID, fusion LiDAR | ⬜ |
 | 5 · Évaluation et livrables | S9 | Tableau sim / réel / baseline, README, vidéo, post LinkedIn | ⬜ |
 
@@ -87,20 +88,20 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 |---|---|---|---|
 | EF-01 | Flux webcam publié dans ROS2 | Must | 🟡 En simulation (`/camera/image_raw`) ; réel à faire |
 | EF-02 | Détection des personnes (bbox + score) | Must | ✅ YOLO26n, en simulation |
-| EF-03 | Identifiant stable par personne | Must | 🟡 ByteTrack : IDs stables tant que la personne est bien visible ; IDs perdus de près (jambes seules) |
-| EF-04 | Track maintenu pendant une occlusion ≤ 2 s | Must | 🟡 ByteTrack garde une piste 30 images (≈ 3 s) ; à mesurer sur occlusion scriptée |
-| EF-05 | Sélection et verrouillage d'une cible | Must | ✅ Piste la plus proche du centre, gardée par ID, ré-acquisition après 2 s |
+| EF-03 | Identifiant stable par personne | Must | 🟡 Vidéo 2 : la cible garde le même ID pendant 5 min 37 s, malgré les passages des autres personnes. Mais une personne très proche (jambes seules) reçoit plusieurs IDs |
+| EF-04 | Track maintenu pendant une occlusion ≤ 2 s | Must | 🟡 ByteTrack garde une piste cachée 90 images (≈ 9 s à 10 images/s) ; vidéo 2 : ID gardé quand une personne passe devant la caméra ; pas encore de mesure chiffrée sur une occlusion scriptée |
+| EF-05 | Sélection et verrouillage d'une cible | Must | ✅ L'utilisateur choisit l'ID dans la fenêtre `target_chooser` (ou mode automatique : la plus proche du centre) ; l'ID est gardé même si une autre personne passe au centre |
 | EF-06 | Orientation vers la cible, distance de 1 m | Must | 🟡 Validé en sim sur une balle de tennis (1,00 m) ; personne et réel à faire |
 | EF-07 | Mode recherche si cible perdue > 2 s | Should | 🟡 État SEARCHING publié après 2 s ; rotation pas encore implémentée |
-| EF-08 | Ré-identification après occlusion longue | Should | ⬜ |
+| EF-08 | Ré-identification après occlusion longue | Should | 🟡 Par la couleur des vêtements : vidéo 1, cible retrouvée sous un nouvel ID (4 → 29) ; limite : deux personnes de même couleur |
 | EF-09 | Distance par fusion caméra-LiDAR | Should | 🟡 Rayons du LiDAR dans la direction de la personne ; erreur ≈ +11 cm |
-| EF-10 | Image de debug (bbox, IDs, cible) | Must | 🟡 `/detector/debug_image` (bbox + score) ; IDs et cible en Phase 3 |
+| EF-10 | Image de debug (bbox, IDs, cible) | Must | ✅ `/detector/debug_image` (bbox + ID) et fenêtre `target_chooser` (ID, couleur, « << CIBLE », état et distance) |
 | EF-11 | Même code en sim et en réel (`mode:=sim/real`) | Must | 🟡 Chaîne complète lancée par `mode:=sim/real` ; réel pas encore testé |
 | EF-12 | Backend de détection couleur (HSV) | Could | ✅ `detector_node backend:=color` |
 | ENF-01 | `header.stamp` d'origine conservé | — | ✅ Recopié jusqu'au contrôleur, latence mesurée |
 | ENF-02 | Paramètres en YAML | — | ✅ Topics, seuils HSV, gains et limites dans `sim.yaml` / `real.yaml` |
-| ENF-03 | Lib indépendante de ROS, testée avec pytest | — | 🟡 18 tests (détecteur, géométrie, loi de commande) ; lib SORT en Phase 3 |
-| ENF-05 | Séquences enregistrées en rosbag et rejouables | — | 🟡 `record:=true` et rejeu validés en simulation ; rosbags réels à faire |
+| ENF-03 | Lib indépendante de ROS, testée avec pytest | — | 🟡 42 tests (perception 10, tracking 21, commande 9, bringup 2) ; lib SORT non faite |
+| ENF-05 | Séquences enregistrées en rosbag et rejouables | — | 🟡 `record:=true` (avec `/tracks` et `/target/select`) et rejeu validés en simulation ; rosbags réels à faire |
 | ENF-06 | README reproductible en < 15 min | — | 🟡 Simulation, rosbags et robot réel documentés |
 | SEC-01 | Watchdog | — | ✅ Arrêt en 275 ms après coupure de la caméra |
 | SEC-02 à 04 | Saturation, accélération, distance minimale | — | ✅ Implémenté et testé (pytest) |
@@ -110,6 +111,89 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 Légende : ✅ fait · 🟡 partiel · ⏳ en cours · ⬜ pas commencé
 
 ## 3. Journal
+
+### 6 octobre 2026 (soir) — Choisir la personne à suivre, et la retrouver après une occlusion
+
+**La demande.** (1) Le robot détecte les personnes et donne à chacune une couleur de vêtements ; l'utilisateur voit les IDs et **choisit** qui suivre. (2) Un monde plus grand, avec les personnes plus loin. (3) Quand une autre personne passe devant la cible, le robot ne doit pas la perdre. (4) La caméra montée en haut du robot.
+
+**Ce qui a été fait**
+
+| Changement | Fichier(s) | En bref |
+|---|---|---|
+| Couleur des vêtements par ID | `tb_perception/clothing_color.py`, `detector_node.py`, `Track.msg` | Couleur dominante du tronc, votée sur les 15 dernières images de chaque ID, publiée dans le nouveau champ `color` de `Track` |
+| Pulls de couleurs différentes | `tb_bringup/actor_skins.py`, `person_world.sdf` | Trois copies du modèle 3D de la personne : pull rouge, vert, violet |
+| Fenêtre de choix | `tb_bringup/target_chooser.py` | Image de la caméra avec « ID n couleur » ; un clic publie l'ID sur `/target/select` |
+| Sélection manuelle | `target_lock.py`, `target_selector_node.py`, `target_person.yaml` | `selection: manual` : le robot attend un choix, puis garde cet ID |
+| Monde agrandi | `person_world.sdf`, `gz_gui.config` | Pièce de 18 × 14 m ; personnes entre 4 et 12 m du départ du robot |
+| Distance au-delà du LiDAR | `target_selector_node.py` | Au-delà de 3,5 m (portée du LiDAR) : distance par la hauteur de la silhouette (1,75 m), si elle est vue en entier |
+| Ré-identification par la couleur | `target_lock.py` | La cible revient sous un nouvel ID : on la retrouve par la couleur de son pull |
+| Pistes gardées plus longtemps | `config/bytetrack_person.yaml` | `track_buffer` 30 → 90 images |
+| Caméra en haut | `model.sdf`, `tb3_burger_cam.urdf` | 13 cm → 26 cm du sol, au-dessus du LiDAR, sur un mât |
+
+**1. La couleur des vêtements.** Pour chaque personne détectée, `clothing_color()` regarde le **tronc** : la moitié centrale de la bbox en largeur, de 15 % à 45 % de sa hauteur (sous la tête, au-dessus des jambes). Elle passe ces pixels en HSV, garde ceux qui sont vraiment colorés (saturation ≥ 70, luminosité ≥ 50), et donne le nom de la teinte la plus fréquente (rouge, orange, jaune, vert, bleu, violet). S'il y a trop peu de pixels colorés, la réponse est blanc, gris ou noir. Une seule image peut se tromper (bras, ombre) : le node garde les 15 dernières réponses de chaque ID et publie la plus fréquente (**vote majoritaire**). Premier essai : la personne verte était annoncée « bleu ». Cause : de près, sa tête sort de l'image, donc la bande 15–45 % tombait sur le jean. Correction : on ne vote avec cette bande que si le haut de la bbox est visible ; sinon, en repli, on lit le haut visible (0–25 %).
+
+**2. Des personnes faciles à distinguer.** Les trois personnes du monde avaient le même modèle 3D (pull vert). `actor_skins.py` crée, au lancement, trois copies du fichier du modèle (`walk.dae`, Gazebo Fuel, licence CC BY 4.0) en changeant seulement la couleur du matériau du pull : rouge, vert, violet. Aucune n'est proche du jaune-vert de la balle de tennis.
+
+**3. La fenêtre de choix.** `target_chooser` (Tkinter) affiche l'image de la caméra. Chaque personne y a un rectangle de la couleur de ses vêtements et l'étiquette « ID n couleur » ; la cible a un trait épais et « << CIBLE ». À droite, un bouton par ID, l'état de la cible (suivie, perdue, introuvable) et sa distance, et « Arrêter le suivi ». Un clic publie l'ID choisi sur `/target/select` (`std_msgs/Int32`, −1 = arrêter). Elle s'ouvre d'office avec `target:=person` (`chooser:=false` pour s'en passer).
+
+![Fenêtre de choix](img/partie2_choix_ids.jpg)
+
+*Vidéo 1, au départ : trois personnes détectées (ID 2 vert, ID 3 violet, ID 4 rouge). L'utilisateur a cliqué sur ID 4 : « Cible : ID 4 - suivie, distance 4,03 m ».*
+
+**4. Le monde agrandi.** Pièce de 18 × 14 m (au lieu de 10 × 8 m). Rouge : rectangle entre x = 4 et 6 m (boucle de 65 s). Vert : va-et-vient en x = 7,5 m (85 s). Violet : diagonale de (9, 3) à (12, −3) (72 s). Plus loin, les personnes sont vues en entier et leurs trajectoires se croisent moins souvent devant la caméra. Comme elles sont au-delà de la portée du LiDAR (3,5 m), la distance vient alors de la hauteur de la bbox : `distance = fy × 1,75 m / hauteur en pixels`. Ce repli n'est utilisé que si le haut de la bbox est dans l'image (sinon la hauteur mesurée est trop petite).
+
+**5. Ne plus perdre la cible quand quelqu'un passe devant.** Pendant le passage, YOLO ne voit plus la cible. Deux choses peuvent alors arriver :
+
+- la cible **revient avec un nouvel ID** (le tracker l'a oubliée). En mode manuel, le robot attendait l'ancien ID indéfiniment ;
+- l'autre personne **prend l'ID de la cible** (*ID switch*), et le robot suivrait la mauvaise personne.
+
+Trois corrections :
+
+1. **ByteTrack garde plus longtemps une piste cachée** : `track_buffer` passe de 30 à 90 images (fichier `bytetrack_person.yaml`). Ultralytics compte ces images comme si la caméra tournait à 30 images/s ; YOLO n'en traite qu'environ 10 par seconde, donc 90 images ≈ 9 s réelles. Souvent, la cible revient avec **le même ID**.
+2. **Ré-identification par la couleur.** `TargetLock` retient la couleur de la cible au moment du choix. Si son ID disparaît et qu'une piste **de la même couleur** apparaît, c'est elle : le robot se verrouille sur ce nouvel ID. On écarte les IDs déjà vus *en même temps* que la cible, car ce sont forcément d'autres personnes.
+3. **Garde contre le vol d'ID.** Si l'ID suivi change de couleur (rouge → vert), ce n'est plus la cible : on la considère perdue.
+
+**6. La caméra en haut.** À 13 cm du sol, la caméra ne voyait que les jambes d'une personne proche. Elle est maintenant à 26 cm, au-dessus du LiDAR, tenue par un mât fin à l'arrière. Le mât est à 6 cm du centre du LiDAR, sous sa portée minimale (12 cm) : il ne masque aucun rayon (vérifié : aucun rayon sous 0,3 m). La caméra reste horizontale : inclinée vers le haut, elle perdrait la balle posée au sol en mode `target:=ball`. Le SDF (Gazebo) et l'URDF (TF de ROS) donnent la même position, sinon l'angle calculé serait faux.
+
+**Les deux vidéos**
+
+Enregistrées à l'écran avec la fenêtre Gazebo et la fenêtre de choix ouvertes. Fichiers dans `~/Documents/project cv/` : `demo_partie2_choix_et_reidentification_brut.mp4` (2 min) et `demo_partie2_occlusion_brut.mp4` (80 s), plus leurs versions accélérées ×2 (`_x2.mp4`). Les événements ci-dessous sont lus dans les logs de `target_selector_node` (`~/.ros/log`).
+
+![Extrait de la vidéo 2](img/demo_partie2_occlusion.gif)
+
+*Vidéo 2 (accélérée ×2) : la cible est la personne verte (ID 3). La personne rouge passe tout près de la caméra et la violette croise la cible : l'ID 3 reste la cible.*
+
+| | Vidéo 1 : choix et ré-identification | Vidéo 2 : passages devant la cible |
+|---|---|---|
+| Cible choisie | ID 4, rouge, à 4,0 m | ID 3, vert (choisie avant l'enregistrement) |
+| Ce qui se passe | Le robot s'approche à ~1,7 m. Puis la personne rouge marche **vers** le robot et arrive tout près : la caméra ne voit plus que ses jambes | La personne rouge passe très près devant la caméra ; la violette croise la cible, puis passe derrière elle |
+| Résultat | ID 4 perdu ; environ 10 s plus tard, **ré-identifiée par sa couleur** sous l'ID 29 (log : `ID 4 -> ID 29`), puis reperdue | **Même ID pendant toute la vidéo** ; au total, ID 3 gardé 5 min 37 s |
+| Verdict | ⚠️ Ré-identification qui marche, mais sur un doublon (voir ci-dessous) | ✅ |
+
+![Passage devant la cible](img/partie2_occlusion.jpg)
+
+*Vidéo 2 : la personne rouge (ID 21) passe entre la caméra et la cible verte (ID 3) : « Cible : ID 3 - suivie, distance 3,50 m ». Le pull rouge, vu de très près et dans l'ombre, est annoncé « orange ».*
+
+**Mesures relevées dans les logs** (deux sessions, 9 et 12 min)
+
+| Mesure | Résultat | Cible du CdC | |
+|---|---|---|---|
+| Détection + suivi | médiane 170–250 ms par image, soit 7–10 images/s | ≥ 15 FPS | ⚠️ |
+| Latence image → commande | médiane 98–171 ms | < 150 ms | 🟡 limite |
+| Vitesse de Gazebo pendant l'enregistrement | 0,40–0,43 × le temps réel | — | (capture vidéo) |
+| Arrêts du watchdog | ~70 par session, un toutes les ~2,3 s en médiane | — | ⚠️ à-coups |
+| Ré-identifications par la couleur | 1 pendant la vidéo 1 (4 → 29) ; 6 au total sur les deux sessions | — | ✅ |
+
+**Ce que les vidéos ont montré**
+
+- **Un défaut de la ré-identification, corrigé.** Dans la vidéo 1, la personne rouge, tout près de la caméra, était détectée **deux fois en même temps** : une boîte pour le corps (ID 4) et une pour les jambes (ID 22). La règle « un ID vu en même temps que la cible est une autre personne » a donc écarté l'ID 22, alors que c'était bien elle. Le robot s'est verrouillé sur l'ID 29, un autre doublon de courte durée, et l'a reperdu. Correction : une boîte qui **chevauche fortement** celle de la cible (plus de 60 % de la plus petite des deux) n'est plus classée comme « autre personne ». Test ajouté avec les valeurs de la vidéo. *Correction faite après les vidéos : vérifiée par les tests, pas encore dans Gazebo.*
+
+  ![Doublon de la cible](img/partie2_doublon_proche.jpg)
+
+  *Vidéo 1. À gauche : la personne rouge, tout près, n'est plus vue que par les jambes (ID 22, annoncé « bleu ») ; « Cible : ID 4 - introuvable ». À droite : la même personne est maintenant l'ID 22 « rouge », mais elle avait été vue en même temps que l'ID 4 : elle était écartée.*
+- **La couleur est fausse de très près.** Pull rouge annoncé « bleu » (seul le jean est visible) ou « orange » (ombre, mains). La ré-identification ne marche alors pas tant que la personne ne s'est pas éloignée.
+- **La personne qui avance vers le robot reste le cas le plus difficile.** Le robot ne peut pas reculer (`max_reverse: 0`) : la personne arrive tout près, la caméra ne voit plus que ses jambes, et ID et couleur deviennent instables. C'est le même problème que la balle qui avance vers le robot (point ouvert n° 4).
+- **Arrêts fréquents du watchdog.** Le watchdog arrête le robot si aucune cible n'arrive pendant 0,3 s. Avec des images traitées toutes les 170–250 ms (et parfois plus), cela arrive souvent : le robot s'arrête une fraction de seconde puis repart (à-coups). Avec l'enregistrement d'écran en plus, l'ordinateur est très chargé (Gazebo à 0,4 × le temps réel).
 
 ### 6 octobre 2026 — Partie 2 : suivi multi-personnes avec Ultralytics
 
@@ -380,19 +464,19 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 | `setuptools` 78 dans `~/.local` après PyTorch | Dépendance de PyTorch | Désinstallé ; la version du système suffit |
 | Distance de la personne fausse | Personne coupée par le haut de l'image | Distance mesurée par le LiDAR |
 | `/clock` à 1 000 Hz dans les rosbags | Enregistrée avec le reste | Retirée ; `ros2 bag play --clock` la régénère |
+| Personne verte annoncée « bleu » | De près, la bande du tronc tombait sur le jean (tête hors de l'image) | Vote avec le tronc seulement si le haut de la bbox est visible ; sinon le haut visible |
+| Cible perdue quand quelqu'un passe devant | La cible revient sous un nouvel ID ; en mode manuel, le robot attendait l'ancien | `track_buffer` 90 + ré-identification par la couleur + garde contre le vol d'ID |
+| Ré-identification sur un doublon (vidéo 1) | Personne très proche détectée deux fois (corps + jambes) : son 2e ID était écarté comme « autre personne » | Une boîte qui chevauche fortement la cible n'est plus classée « autre personne » |
+| Test de couleur qui échoue une fois sur deux | Autant de pixels rouges que bleus dans la bande : égalité départagée au hasard | Test corrigé (2/3 de jean dans la bande) |
+| `pkill -f` tue le terminal qui le lance | Le motif apparaît aussi dans la ligne de commande du terminal | Arrêter les processus par leur numéro (PID) |
 
 ## 5. Points ouverts et décisions à prendre
 
-1. **Hauteur et inclinaison de la caméra** (**bloquant** pour le suivi de personne : de près, seules les jambes sont visibles, d'où des détections intermittentes et des IDs perdus). La caméra est à 13 cm du sol et pointe à l'horizontale. À 1 m de la personne, on ne verrait que ses jambes. Trois options :
-   - incliner la caméra vers le haut d'environ 25° ;
-   - monter la webcam sur un mât ;
-   - suivre la personne à 1,5–2 m au lieu de 1 m.
-
-   Le modèle de simulation devra reproduire le montage choisi sur le vrai robot.
+1. ~~**Hauteur de la caméra**~~ : réglé le 6 octobre. Caméra en haut du robot, à 26 cm, sur un mât. Une personne est vue en entier à partir d'environ 3 m ; à 1 m, on voit encore jusqu'aux épaules environ. **Il faudra reproduire ce montage sur le vrai robot** (mât à l'arrière, hors des rayons du LiDAR) ou mettre le modèle à jour avec le montage réel.
 
 2. **Incohérence dans le cahier des charges** : le schéma du planning indique « YOLOv8n » en Phase 2, alors que le texte retient YOLO26n.
-3. **Dépendance manquante** : `ultralytics` n'est pas installé. On n'en a besoin qu'en Phase 2.
-4. **Recul** (décision à prendre). Le paramètre `max_reverse` existe maintenant mais vaut 0 (désactivé). Le test au joystick a montré qu'une balle qui avance vers le robot finit par le toucher. Proposition : `max_reverse: 0.05` en simulation et en réel. C'est plus sûr, car la caméra ne voit pas derrière, mais le robot ne peut pas corriger s'il est trop près. En simulation, le glissement du modèle l'amène à 0,83 m en 30 s, près de la limite de 0,8 m. Sur le vrai robot, le même cas se produira si la personne avance vers lui. Option : autoriser un léger recul (≤ 0,05 m/s) quand la cible est sous la consigne, l'arrêt sous 0,5 m (SEC-04) restant prioritaire.
+3. ~~Dépendance manquante~~ : `ultralytics` est installé (voir le journal de la Partie 2).
+4. **Recul** (décision à prendre, **devenue importante** : dans la vidéo 1, la personne qui marche vers le robot arrive trop près, et son ID et sa couleur deviennent instables). Le paramètre `max_reverse` existe maintenant mais vaut 0 (désactivé). Le test au joystick a montré qu'une balle qui avance vers le robot finit par le toucher. Proposition : `max_reverse: 0.05` en simulation et en réel. C'est plus sûr, car la caméra ne voit pas derrière, mais le robot ne peut pas corriger s'il est trop près. En simulation, le glissement du modèle l'amène à 0,83 m en 30 s, près de la limite de 0,8 m. Sur le vrai robot, le même cas se produira si la personne avance vers lui. Option : autoriser un léger recul (≤ 0,05 m/s) quand la cible est sous la consigne, l'arrêt sous 0,5 m (SEC-04) restant prioritaire.
 5. **Cadence de la caméra simulée** : environ 15 images/s reçues au lieu de 30. C'est juste à la limite de la cible de 15 FPS du CdC, avant même d'ajouter YOLO. À surveiller en Phase 2 (rendu GPU, résolution).
 6. **Priorité de la téléop (SEC-05)** : `estop_keyboard` arrête le robot, mais une commande de téléop n'est pas encore prioritaire sur le suiveur (option : `twist_mux`).
 7. **Réglages pour le réel** : seuils HSV à régler sur des images réelles (une balle de tennis usée est plus terne), horloges robot/laptop à synchroniser pour que la latence mesurée soit juste.
@@ -400,9 +484,22 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 9. ~~Branches git du workspace~~ : réglé le 6 octobre, les quatre dépôts ROBOTIS sont sur `jazzy`.
 10. **Détecteur plus lent que la caméra** (≈ 17 contre 28 images/s en simulation sans fenêtre). À mesurer avant YOLO (Phase 2), et à comparer avec la cible du cahier des charges (≥ 15 FPS en simulation).
 11. **Écart au cahier des charges** : suivi par ByteTrack (Ultralytics) au lieu d'un SORT codé soi-même (objectif d'apprentissage du CdC). À rediscuter : coder SORT pour le comparer à ByteTrack ?
-12. **11 images/s au lieu de 15** : pilote NVIDIA ou export OpenVINO.
+12. **7 à 11 images/s au lieu de 15** (7–10 avec la fenêtre Gazebo, la fenêtre de choix et l'enregistrement d'écran) : pilote NVIDIA ou export OpenVINO.
+13. **Deux personnes habillées de la même couleur** : la ré-identification par la couleur ne peut pas les distinguer. Pistes : comparer aussi la couleur du bas du corps, la taille, la position prévue ; ou un vrai modèle de ré-identification (comme DeepSORT).
+14. **Couleur fausse de très près** (rouge lu « bleu » ou « orange ») : n'accepter un vote que si le tronc est assez visible, ou garder la couleur mémorisée au moment du choix.
+15. **À-coups dus au watchdog** (~70 arrêts brefs par session) : le délai de 0,3 s est court pour un détecteur à 7–10 images/s. Options : rendre la détection plus rapide (point 12), ou un délai propre au mode personne (sans dépasser l'arrêt en moins de 0,5 s exigé par SEC-01).
+16. **Vérifier dans Gazebo la correction des doublons** (faite après les vidéos, seulement testée par pytest).
 
-## 6. Prochaines étapes (fin de la Phase 1)
+## 6. Prochaines étapes
+
+**Suivi de personne (simulation)**
+
+- Rejouer le scénario de la vidéo 1 pour vérifier la correction des doublons.
+- Décider du recul (`max_reverse`) : c'est maintenant le principal défaut quand la personne marche vers le robot.
+- Mesurer une occlusion scriptée (EF-04) : durée de l'occlusion, ID gardé ou retrouvé, temps pour retrouver la cible.
+- Gagner en vitesse (pilote NVIDIA ou OpenVINO) pour réduire les à-coups du watchdog.
+
+**Fin de la Phase 1 (robot réel)**
 
 - **Sans robot** : tester le mode réel côté caméra avec la webcam du portable (`robot_camera.launch.py`), et s'entraîner à régler le HSV sur une vraie balle de tennis.
 - **Décider** du recul (`max_reverse`).
@@ -564,7 +661,56 @@ Autour de la formule du contrôleur, le node applique plusieurs protections :
 
 Le bridge `ros_gz_bridge` transmet `/cmd_vel` à Gazebo. Le plugin **DiffDrive** du robot convertit (v, ω) en vitesse pour chaque roue : pour tourner à gauche, la roue droite va plus vite que la gauche. Il publie aussi l'**odométrie** (`/odom`), la position estimée en comptant les tours de roue.
 
-### À venir (Phase 3) — Le tracking avec SORT
+### La chaîne pour suivre une personne (`target:=person`)
+
+Les étapes 1 à 5 décrivent la chaîne de la balle. Pour une personne, la forme reste la même, mais l'étape 2 change beaucoup et une fenêtre de choix s'ajoute :
+
+```
+/camera/image_raw
+   ▼
+detector_node (backend yolo)    YOLO26n trouve les personnes        « où sont les personnes ? »
+                                ByteTrack leur donne un ID          « qui est qui d'une image à l'autre ? »
+                                clothing_color lit leur pull        « de quelle couleur est chacune ? »
+   │  /tracks                   TrackArray (ID, bbox, couleur)
+   ├────────────────────────▶ target_chooser (fenêtre)    l'utilisateur clique sur une personne
+   │                               │  /target/select     Int32 (l'ID choisi, -1 = arrêter)
+   ▼                               ▼
+target_selector_node            verrouille l'ID choisi, le retrouve après une occlusion,
+   │                            calcule l'angle (caméra) et la distance (LiDAR /scan)
+   │  /target
+   ▼
+follower_controller  →  /cmd_vel  →  roues
+```
+
+**Étape 2 bis — Trouver les personnes et leur donner un ID.** `yolo_detector.py` appelle `model.track(image, persist=True, tracker=...)` d'Ultralytics. En un seul appel :
+
+1. **YOLO26n** (un réseau de neurones de 5 Mo) regarde l'image et renvoie une bbox et un score pour chaque personne (classe 0 du jeu de données COCO) ;
+2. **ByteTrack** associe ces bbox aux personnes de l'image précédente et donne à chacune son **ID** (même principe que SORT, expliqué plus bas). `persist=True` lui dit de garder sa mémoire d'un appel à l'autre.
+
+**Étape 2 ter — La couleur des vêtements.** Pour chaque ID, `clothing_color()` lit le tronc de la personne et donne le nom de sa couleur (méthode détaillée dans le journal). Le node garde les 15 dernières réponses de chaque ID et publie la plus fréquente. Exemple : les 15 dernières images de l'ID 4 ont donné 12 × « rouge », 2 × « orange » et 1 × « bleu » : la couleur publiée est « rouge ». Une erreur isolée ne change rien.
+
+**Étape 2 quater — L'utilisateur choisit.** `target_chooser` dessine les `/tracks` sur l'image. Un clic dans un rectangle, ou sur un bouton « ID n », publie ce numéro sur `/target/select`.
+
+**Étape 3 bis — Verrouiller la cible et la retrouver** (`target_lock.py`, sans ROS, 15 tests). À chaque image, `TargetLock.update()` reçoit la liste des pistes et rend un **état** : IDLE (rien de choisi), LOCKED (vue), LOST (cachée depuis moins de 2 s), SEARCHING (cachée depuis plus longtemps). Il retient trois choses : l'ID suivi, la **couleur** de la cible, et les IDs vus **en même temps** qu'elle (ce sont d'autres personnes).
+
+Exemple : la cible est l'ID 7, rouge ; l'ID 8 (vert) passe devant elle.
+
+| Image | Pistes reçues | Raisonnement | État |
+|---|---|---|---|
+| 1 | 7 rouge, 8 vert | 7 est là. On retient : couleur « rouge » ; l'ID 8 est une autre personne | LOCKED, ID 7 |
+| 2 | 8 vert | 7 a disparu. Une piste rouge jamais vue avec la cible ? Non | LOST, ID 7 |
+| 3 | 8 vert, **12 rouge** | 7 toujours absent. 12 est rouge et n'a jamais été vu avec la cible : c'est elle, revenue sous un nouvel ID | LOCKED, **ID 12** (ré-identifiée) |
+
+Deux cas particuliers :
+
+- **Vol d'ID** : si l'ID 7 réapparaît en **vert**, c'est l'autre personne qui a pris le numéro. La cible est considérée perdue.
+- **Doublon** : une personne tout près de la caméra peut avoir deux boîtes à la fois (corps et jambes). Une boîte qui recouvre fortement celle de la cible (plus de 60 % de la plus petite) n'est pas classée « autre personne » : elle peut prendre le relais.
+
+**Étape 3 ter — La distance d'une personne.** La hauteur de la bbox ne marche pas de près (la personne sort de l'image par le haut). `target_selector_node` prend donc les rayons du LiDAR dans la direction de la personne : l'angle vient de la caméra, la distance du LiDAR (**fusion caméra-LiDAR**). Il garde le 20e percentile de ces distances, pour viser le corps et pas le mur derrière. Au-delà de la portée du LiDAR (3,5 m), si la personne est vue en entier : `distance = fy × 1,75 m / hauteur de la bbox`.
+
+### Pour aller plus loin — Le tracking avec SORT (ce que fait ByteTrack)
+
+*Le cahier des charges prévoyait de coder SORT soi-même. Le projet utilise pour l'instant ByteTrack, qui repose sur les mêmes idées : cette partie explique ce qui se passe à l'intérieur.*
 
 **Le problème.** YOLO (Phase 2) détecte les personnes **image par image**, sans mémoire. Dans l'image 1 il trouve deux personnes, dans l'image 2 aussi, mais il ne dit pas *laquelle est laquelle*. Pour suivre **une** personne précise, il faut lui donner un **identifiant** (ID 1, ID 2…) qui reste le même d'une image à l'autre, même si elle est cachée un instant. C'est le **tracking multi-objets**.
 
@@ -707,6 +853,8 @@ Dans un cas aussi net, on pourrait associer « à la main ». L'algorithme devie
 | **SDF / URDF** | Formats de description d'un robot ou d'un monde (formes, articulations, capteurs). Gazebo utilise le SDF, ROS (TF) l'URDF. |
 | **Bridge (ros_gz)** | Traducteur entre les topics Gazebo et les topics ROS 2. |
 | **Actor** | Personnage animé qui suit une trajectoire scriptée (la personne qui marche). |
+| **Mesh / COLLADA (.dae)** | Fichier 3D d'un modèle (formes, matériaux, animation). La couleur du pull est un matériau du fichier `walk.dae`. |
+| **Gazebo Fuel** | Bibliothèque en ligne de modèles 3D pour Gazebo (d'où vient la personne). |
 | **Vérité terrain** | Position exacte connue du simulateur, utilisée pour mesurer l'erreur des estimations. |
 | **Real time factor** | Vitesse de la simulation par rapport au temps réel (1,2 = 20 % plus rapide). |
 | **Plugin Gazebo** | Module ajouté à un modèle pour lui donner un comportement. Ici : `DiffDrive` (roues du robot), `VelocityControl` (vitesse imposée à la balle). |
@@ -754,7 +902,7 @@ Dans un cas aussi net, on pourrait associer « à la main ». L'algorithme devie
 | **Test unitaire / pytest** | Petit programme qui vérifie automatiquement une fonction sur un cas connu. |
 | **Hypothèse / diagnostic** | Supposer une cause, puis faire une mesure qui peut la confirmer ou la rejeter. |
 
-### À venir (phases 2 à 4)
+### Détection et suivi de personnes
 
 | Terme | Définition |
 |---|---|
@@ -769,7 +917,19 @@ Dans un cas aussi net, on pourrait associer « à la main ». L'algorithme devie
 | **Ré-identification** | Reconnaître une personne après une longue disparition, grâce à son apparence. |
 | **ByteTrack** | Tracker utilisé par Ultralytics : comme SORT (Kalman + association), mais il utilise aussi les détections peu sûres en seconde passe, ce qui rattrape les personnes à moitié cachées. |
 | **`model.track()`** | Fonction d'Ultralytics qui fait détection + suivi en un appel ; `persist=True` garde les pistes d'une image à l'autre. |
-| **track_buffer** | Nombre d'images pendant lesquelles ByteTrack garde une piste sans détection (30 ≈ 3 s à 10 images/s). |
+| **track_buffer** | Nombre d'images pendant lesquelles ByteTrack garde une piste sans détection. Ultralytics le compte à 30 images/s ; à 10 images/s réelles, 90 (notre réglage) ≈ 9 s. |
+| **Piste (track)** | Une personne suivie par le tracker : un ID, une bbox, une vitesse, une durée de vie. |
+| **Verrouillage (lock)** | Suivre un ID précis, sans changer de cible quand une autre personne est mieux placée. |
+| **Sélection manuelle / automatique** | Manuelle : l'utilisateur choisit l'ID. Automatique : la personne la plus proche du centre de l'image. |
+| **Ré-identification par la couleur** | Retrouver la cible revenue sous un nouvel ID en comparant la couleur de ses vêtements à celle mémorisée. Version simple de la ré-identification par l'apparence. |
+| **Vote majoritaire** | Garder la réponse la plus fréquente sur plusieurs images, pour qu'une erreur isolée ne compte pas. |
+| **Doublon de détection** | Deux boîtes pour une même personne (ex. corps entier + jambes), donc deux IDs. |
+| **Chevauchement** | Part d'une boîte couverte par une autre (0 = séparées, 1 = l'une dans l'autre). Proche de l'IoU, mais rapportée à la plus petite boîte. |
+| **COCO** | Grand jeu d'images annotées sur lequel YOLO est entraîné ; 80 classes, la classe 0 est « personne ». |
+| **Percentile** | Le 20e percentile d'une liste de distances est la valeur sous laquelle se trouvent 20 % d'entre elles : une « petite » distance, robuste aux valeurs isolées. |
+| **Tkinter** | Bibliothèque de fenêtres incluse dans Python (joystick, fenêtre de choix). |
+| **Mât** | Support vertical qui place la caméra plus haut sur le robot. |
+| **Portée minimale du LiDAR** | Distance sous laquelle le LiDAR ne mesure rien (12 cm) : un objet plus proche, comme le mât, est ignoré. |
 | **Thread / sur-souscription** | Un thread est un fil d'exécution sur un cœur du processeur. Lancer plus de threads que de cœurs (sur-souscription) fait attendre tout le monde, et tout ralentit. |
 | **CPU / GPU** | Processeur principal / carte graphique. Les réseaux de neurones vont beaucoup plus vite sur GPU, mais il faut son pilote (ici absent : YOLO tourne sur CPU). |
 | **Fusion caméra-LiDAR** | Combiner l'angle donné par la caméra et la distance précise donnée par le LiDAR. |
@@ -797,16 +957,22 @@ Gazebo ◀──balle────── ros_gz_bridge ◀── /ball/cmd_vel �
 /joint_states ──▶ robot_state_publisher ──▶ /tf  /tf_static  /robot_description
 ```
 
-**Côté projet** : la chaîne de suivi, du haut vers le bas.
+**Côté projet** : la chaîne de suivi, du haut vers le bas. Avec `target:=ball`, le détecteur publie `/detections` (la balle) ; avec `target:=person` (par défaut), il publie `/tracks` (les personnes et leurs IDs), et la fenêtre de choix s'ajoute.
 
 ```
 /camera/image_raw
         │
         ▼
   detector_node ─────────────────────▶ /detector/debug_image  (pour regarder)
-        │ /detections
-        ▼
-  target_selector_node ◀───────────── /camera/camera_info
+        │ /detections (balle)  ou  /tracks (personnes)
+        │                               │
+        │                               ▼
+        │                         target_chooser ──▶ /target/select (ID choisi)
+        ▼                                                │
+  target_selector_node ◀─────────────────────────────────┘
+        ▲   ▲
+        │   └──── /scan (distance LiDAR, personnes)
+        └──────── /camera/camera_info
         │ /target
         ▼
   follower_controller ◀────────────── /follower/enable ◀── estop_keyboard
@@ -821,8 +987,9 @@ Pour voir ce graphe en direct : `ros2 run rqt_graph rqt_graph`.
 
 | Node | Rôle | Reçoit | Envoie |
 |---|---|---|---|
-| `detector_node`<br>*`tb_perception`*<br>lancé par `bringup.launch.py` | Trouve la balle dans chaque image (seuillage HSV, contours, bbox) | `/camera/image_raw` | `/detections`, `/detector/debug_image` |
-| `target_selector_node`<br>*`tb_tracking`*<br>lancé par `bringup.launch.py` | Choisit la cible et convertit sa bbox en angle et distance ; gère l'état LOCKED / LOST / SEARCHING | `/detections`, `/camera/camera_info` | `/target` |
+| `detector_node`<br>*`tb_perception`*<br>lancé par `bringup.launch.py` | Balle : seuillage HSV. Personnes : YOLO26n + ByteTrack (un ID par personne) et couleur des vêtements de chaque ID | `/camera/image_raw` | `/detections` (balle) ou `/tracks` (personnes), `/detector/debug_image` |
+| `target_selector_node`<br>*`tb_tracking`*<br>lancé par `bringup.launch.py` | Choisit la cible (balle : meilleure détection ; personne : l'ID choisi, retrouvé par sa couleur après une occlusion), calcule son angle et sa distance (LiDAR pour une personne) ; gère l'état IDLE / LOCKED / LOST / SEARCHING | `/detections` ou `/tracks`, `/target/select`, `/scan`, `/camera/camera_info` | `/target` |
+| `target_chooser`<br>*`tb_bringup`*<br>lancé par `bringup.launch.py` avec `target:=person` (`chooser:=false` pour ne pas l'ouvrir) | Fenêtre Tkinter : image de la caméra avec les personnes (« ID n couleur »), clic pour choisir qui suivre, état et distance de la cible | `/camera/image_raw`, `/tracks`, `/target` | `/target/select` |
 | `follower_controller`<br>*`tb_control`*<br>lancé par `bringup.launch.py` | Calcule les vitesses (contrôleur P) et applique toutes les sécurités (watchdog, saturation, rampe) | `/target`, `/follower/enable` | `/cmd_vel` |
 | `estop_keyboard`<br>*`tb_control`*<br>lancé par à la main : `ros2 run tb_control estop_keyboard` | Arrêt d'urgence au clavier : `g` active, espace arrête | — | `/follower/enable`, `/cmd_vel` (commande nulle à l'arrêt) |
 | `ros_gz_bridge`<br>*`ros_gz_bridge` (ROS)*<br>lancé par `sim.launch.py` | Traduit les topics Gazebo ↔ ROS 2 selon `config/gz_bridge.yaml` | `/cmd_vel`, `/ball/cmd_vel` | `/clock`, `/odom`, `/tf`, `/scan`, `/imu`, `/joint_states`, `/camera/camera_info` |
@@ -835,7 +1002,7 @@ Pour voir ce graphe en direct : `ros2 run rqt_graph rqt_graph`.
 | `create`<br>*`ros_gz_sim` (ROS)*<br>lancé par `sim.launch.py` | Fait apparaître le robot dans Gazebo, puis se termine | — | — |
 | `rviz`<br>*`rviz2` (ROS)*<br>lancé par à la main : `rviz2` | Affiche les données des capteurs, le modèle du robot et les repères | ce qu'on lui ajoute (`/scan`, `/odom`…) | `/clicked_point`, `/goal_pose`, `/initialpose` (outils de la barre, non utilisés) |
 
-Les nodes du projet sont les quatre premiers, plus `ball_joystick` (outil de simulation). Les autres viennent de ROS 2, de Gazebo ou de RViz.
+Les nodes du projet sont les cinq premiers, plus `ball_joystick` (outil de simulation). Les autres viennent de ROS 2, de Gazebo ou de RViz.
 
 Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système de topics. C'est pour ça qu'il faut les deux bridges.
 
@@ -849,7 +1016,7 @@ Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système
 |---|---|---|---|
 | `/camera/image_raw`<br>*`sensor_msgs/Image`* | `ros_gz_image` → `detector_node` | L'image de la caméra : 640 × 480 pixels, RGB, avec l'heure de prise de vue | 30 Hz configuré ; ~8–15 mesuré |
 | `/camera/camera_info`<br>*`sensor_msgs/CameraInfo`* | `ros_gz_bridge` → `target_selector_node` | Les intrinsèques de la caméra (fx = 457, cx = 320…) pour passer des pixels aux angles | ~20 Hz |
-| `/scan`<br>*`sensor_msgs/LaserScan`* | `ros_gz_bridge` → (RViz ; fusion LiDAR en Phase 4) | 360 distances mesurées par le LiDAR, une par degré, de 0,12 à 3,5 m | 5 Hz ; ~3,5 mesuré |
+| `/scan`<br>*`sensor_msgs/LaserScan`* | `ros_gz_bridge` → `target_selector_node` (distance d'une personne), RViz | 360 distances mesurées par le LiDAR, une par degré, de 0,12 à 3,5 m | 5 Hz ; ~3,5 mesuré |
 | `/odom`<br>*`nav_msgs/Odometry`* | `ros_gz_bridge` → (RViz) | Position et vitesse estimées en comptant les tours de roue ; dérive avec le temps | 30 Hz |
 | `/imu`<br>*`sensor_msgs/Imu`* | `ros_gz_bridge` → (personne) | Accélérations et vitesses de rotation mesurées par la centrale inertielle | 200 Hz ; ~130 mesuré |
 | `/joint_states`<br>*`sensor_msgs/JointState`* | `ros_gz_bridge` → `robot_state_publisher` | Angle de chaque roue | à chaque pas de simulation |
@@ -864,7 +1031,8 @@ Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système
 |---|---|---|---|
 | `/detections`<br>*`vision_msgs/Detection2DArray`* | `detector_node` → `target_selector_node` | Liste des objets trouvés dans l'image : bbox (centre, taille en pixels), classe (`tennis_ball`), score. Liste vide si rien n'est vu | une par image |
 | `/detector/debug_image`<br>*`sensor_msgs/Image`* | `detector_node` → `rqt_image_view`, RViz | L'image avec la bbox dessinée. Calculée seulement si quelqu'un écoute | une par image |
-| `/tracks`<br>*`tb_interfaces/TrackArray`* | `detector_node` (mode suivi) → `target_selector_node` | Les personnes suivies : ID, bbox, score, vitesse dans l'image, âge de la piste | une par image traitée (≈ 11 Hz) |
+| `/tracks`<br>*`tb_interfaces/TrackArray`* | `detector_node` (`target:=person`) → `target_selector_node`, `target_chooser` | Les personnes suivies : ID, bbox, score, et **couleur des vêtements** (`color`, ex. « rouge ») | une par image traitée (7–11 Hz) |
+| `/target/select`<br>*`std_msgs/Int32`* | `target_chooser` (ou `ros2 topic pub`) → `target_selector_node` | L'ID de la personne à suivre ; −1 = arrêter le suivi | à chaque clic |
 | `/target`<br>*`tb_interfaces/TargetState`* | `target_selector_node` → `follower_controller` | La cible : état (IDLE, LOCKED, LOST, SEARCHING), angle (rad), distance (m), bbox, temps depuis la dernière vue | une par image |
 | `/cmd_vel`<br>*`geometry_msgs/TwistStamped`* | `follower_controller` → `ros_gz_bridge` → roues | La commande : vitesse d'avance `v` (m/s) et de rotation `ω` (rad/s), avec l'heure | 20 Hz |
 | `/ball/cmd_vel`<br>*`geometry_msgs/Twist`* | `ball_joystick` → `ros_gz_bridge` → plugin `VelocityControl` de la balle | Vitesse de la balle : `linear.x` (vers +x), `linear.y` (vers +y), en m/s. Simulation uniquement | 20 Hz |
@@ -884,10 +1052,12 @@ Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système
 | `ros2 topic echo /target` | Les messages en direct |
 | `ros2 interface show tb_interfaces/msg/TargetState` | La structure d'un message |
 | `ros2 run rqt_graph rqt_graph` | Le graphe nodes ↔ topics |
+| `ros2 topic pub --once /target/select std_msgs/msg/Int32 "{data: 3}"` | Choisir l'ID 3 sans la fenêtre |
+| `ros2 topic echo /tracks --field tracks` | Les IDs et couleurs en direct |
 
 ## Annexe E — Refaire tout le projet seul, étape par étape
 
-Ce guide reprend le projet depuis une machine vierge jusqu'au robot qui suit la balle en simulation. Chaque étape a la même structure :
+Ce guide reprend le projet depuis une machine vierge jusqu'au robot qui suit la balle (étapes 0 à 15), puis une personne choisie (étapes 16 à 20), en simulation. Chaque étape a la même structure :
 
 - **But** : ce qu'on construit.
 - **À faire** : les commandes et les fichiers.
@@ -984,7 +1154,7 @@ Limite : pour un projet de cette taille, 5 packages, c'est un peu plus que le st
 - *Contenu* : `msg/Track.msg` (une personne suivie), `msg/TrackArray.msg` (toutes les pistes d'une image), `msg/TargetState.msg` (la cible : état, angle, distance).
 - *Dépend de* : `std_msgs` (pour `Header`), `vision_msgs` (pour `BoundingBox2D`).
 - *Utilisé par* : `tb_tracking` et `tb_control`.
-- *Évolution* : `Track` et `TrackArray` serviront en Phase 3 avec le tracker.
+- *Évolution* : `Track` et `TrackArray` sont utilisés depuis la Partie 2 (`/tracks`) ; `Track` a reçu un champ `color` (couleur des vêtements).
 
 **`tb_perception` — voir**
 
@@ -992,7 +1162,7 @@ Limite : pour un projet de cette taille, 5 packages, c'est un peu plus que le st
 - *Rôle* : transformer une image en une liste d'objets détectés (bbox + score).
 - *Contenu* : `color_detector.py` (seuillage HSV, sans ROS) ; `detector_node.py` (le node : image → `/detections`, plus l'image de debug) ; `test/test_color_detector.py`.
 - *Dépend de* : `rclpy`, `sensor_msgs` (images), `vision_msgs` (détections), `cv_bridge` (image ROS ↔ OpenCV), OpenCV, NumPy.
-- *Évolution* : Phase 2, ajout d'un backend YOLO (classe « person ») dans le même node, au choix avec `backend: color` ou `backend: yolo`.
+- *Évolution* : fait : backend YOLO + ByteTrack (`yolo_detector.py`, `backend: yolo`) et couleur des vêtements (`clothing_color.py`).
 
 **`tb_tracking` — suivre et choisir la cible**
 
@@ -1000,7 +1170,7 @@ Limite : pour un projet de cette taille, 5 packages, c'est un peu plus que le st
 - *Rôle* : décider quel objet suivre et le convertir en angle et distance en mètres.
 - *Contenu* : `target_geometry.py` (calculs du modèle sténopé, sans ROS) ; `target_selector_node.py` (`/detections` + `/camera/camera_info` → `/target`) ; `test/test_target_geometry.py`.
 - *Dépend de* : `rclpy`, `sensor_msgs`, `vision_msgs`, `tb_interfaces`, NumPy, SciPy.
-- *Évolution* : Phase 3, ajout de la lib SORT (filtre de Kalman + algorithme hongrois) et d'un `tracker_node` (`/detections` → `/tracks`) ; `target_selector_node` lira alors `/tracks` et verrouillera une cible par son identifiant. Phase 4 : fusion avec `/scan` pour la distance.
+- *Évolution* : fait : `target_lock.py` (verrouillage d'un ID, choix par l'utilisateur, ré-identification par la couleur), lecture de `/tracks` et `/target/select`, distance par `/scan`. Reste possible : une lib SORT codée soi-même, à comparer avec ByteTrack.
 
 **`tb_control` — agir en sécurité**
 
@@ -1016,7 +1186,7 @@ Limite : pour un projet de cette taille, 5 packages, c'est un peu plus que le st
 - *Rôle* : tout démarrer avec une seule commande, en simulation ou sur le vrai robot (`mode:=sim` / `mode:=real`), avec les bons paramètres.
 - *Contenu* : `launch/` (`bringup.launch.py`, `sim.launch.py`) ; `config/` (`sim.yaml`, `real.yaml`, le bridge `gz_bridge.yaml`, l'interface Gazebo `gz_gui.config`) ; `models/tb3_burger_cam/` (le robot avec webcam) ; `urdf/` (sa description pour TF) ; `worlds/person_world.sdf` (le monde de test) ; `ball_joystick.py` (outil de simulation).
 - *Dépend de* : `launch`, `launch_ros`, `ros_gz_sim`, `ros_gz_bridge`, `ros_gz_image`, `robot_state_publisher`, `turtlebot3_gazebo` (pour les meshes du Burger), et les trois packages de la chaîne.
-- *Évolution* : ajout des launch files du robot réel, des rosbags de référence, d'une config RViz.
+- *Évolution* : fait : fenêtre de choix `target_chooser.py`, pulls colorés des personnes (`actor_skins.py`), config ByteTrack `bytetrack_person.yaml`, caméra en haut du robot. Reste : rosbags réels de référence, config RViz.
 
 **Qui dépend de qui** (une flèche = « a besoin de »)
 
@@ -1067,6 +1237,7 @@ Ajouter un `.gitignore` (`build/`, `install/`, `log/`, `__pycache__/`, rosbags, 
 
 - Copier `turtlebot3_burger_cam/model.sdf` et `model.config` dans `tb_bringup/models/tb3_burger_cam/`, et l'URDF `turtlebot3_burger_cam.urdf` dans `tb_bringup/urdf/`.
 - Remplacer le capteur fisheye par `<sensor type="camera">` : 640×480, `<horizontal_fov>1.2217</horizontal_fov>` (70°), 30 Hz, topic `camera/image_raw`, `<camera_info_topic>camera/camera_info</camera_info_topic>`, `<gz_frame_id>camera_rgb_optical_frame</gz_frame_id>`, un peu de bruit gaussien.
+- Placer la caméra **en haut du robot** : `<pose>-0.032 0 0.260 0 0 0</pose>` pour `camera_link` (26 cm du sol, au-dessus du LiDAR), et la même position dans l'URDF (`camera_joint` : `-0.035 0 0.241` depuis `base_link`). Ajouter des `<visual>` pour la caméra, un bras et un mât fin à l'arrière (à moins de 12 cm du LiDAR, donc invisible pour lui).
 - Dans `setup.py`, installer les dossiers `launch`, `config`, `worlds`, `urdf`, `models` dans `share/tb_bringup` (avec `data_files`).
 
 **Vérifier.** Étape 7 (il faut le launch pour le tester).
@@ -1085,6 +1256,8 @@ Ajouter un `.gitignore` (`build/`, `install/`, `log/`, `__pycache__/`, rosbags, 
 **Vérifier.** Étape 7.
 
 **Piège.** Le mesh de la personne est téléchargé au premier lancement : il faut internet.
+
+*Version actuelle* : pièce de 18 × 14 m, trois personnes (pulls rouge, vert, violet, étape 18) sur des trajectoires entre 4 et 12 m du robot.
 
 ### Étape 7 — Lancer la simulation (`sim.launch.py`, `bringup.launch.py`)
 
@@ -1216,12 +1389,75 @@ Dans `bringup.launch.py` : un argument `mode` (`sim` ou `real`) qui inclut `sim.
 - Le `camera.launch.py` de ROBOTIS est fait pour la caméra Pi, pas pour une webcam USB.
 - Sans synchronisation des horloges (`chrony`), la latence mesurée entre robot et laptop est fausse.
 
+### Étape 16 — Détecter les personnes avec YOLO (Partie 1)
+
+**But.** Remplacer la détection couleur par un réseau de neurones, pour les personnes.
+
+**À faire.**
+
+1. Installer PyTorch (version CPU) et Ultralytics **sans casser ROS** : `pip install --user` de `torch` (index CPU), puis `ultralytics --no-deps`, `numpy==1.26.4` (la version de ROS Jazzy), et `lap`. Garder l'OpenCV du système.
+2. `yolo_detector.py` (sans ROS) : charge `yolo26n.pt` et renvoie des `Detection` (bbox, score) pour la classe 0 (personne).
+3. Dans `detector_node`, un paramètre `backend: yolo` ; et dans le launch, `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, plus `torch.set_num_threads(3)` réappliqué à chaque image.
+
+**Vérifier.** Le log « Detection : mediane … ms/image » : environ 100–130 ms par image sans enregistrement d'écran ; Gazebo près de 1 × le temps réel.
+
+**Piège.** Trop de threads : chaque bibliothèque lance un thread par cœur et tout ralentit (Gazebo à 0,24 ×). Ultralytics remet aussi PyTorch à 7 threads à la première image.
+
+### Étape 17 — Suivre plusieurs personnes avec ByteTrack (Partie 2)
+
+**But.** Un ID stable par personne, et un robot qui suit un ID précis.
+
+**À faire.**
+
+1. Dans `yolo_detector.py`, `model.track(image, persist=True, tracker='bytetrack.yaml', conf=0.1)` au lieu de `predict` ; lire `result.boxes.id`.
+2. `detector_node` publie `/tracks` (`TrackArray`).
+3. `target_lock.py` (sans ROS) : la classe `TargetLock` (états IDLE / LOCKED / LOST / SEARCHING), avec ses tests ; `target_selector_node` avec `input: tracks`.
+4. Distance par le LiDAR (`distance_from_scan`, 20e percentile des rayons dans la direction de la personne).
+
+**Vérifier.** `ros2 topic echo /target` : `target_id` reste le même quand une autre personne passe au centre de l'image.
+
+### Étape 18 — Couleur des vêtements et choix de la personne
+
+**But.** L'utilisateur reconnaît les personnes et choisit qui suivre.
+
+**À faire.**
+
+1. `clothing_color.py` (sans ROS, avec tests) ; champ `string color` dans `Track.msg` ; vote sur 15 images par ID dans `detector_node`.
+2. `actor_skins.py` : copies de `walk.dae` avec la couleur du matériau `sweater-green-effect` changée ; dossier ajouté à `GZ_SIM_RESOURCE_PATH` dans `sim.launch.py` ; dans le monde, `model://person_actors/meshes/walk_rouge.dae`, etc.
+3. `target_chooser.py` (Tkinter) : abonné à l'image, `/tracks` et `/target` ; publie `Int32` sur `/target/select`. Dans `TargetLock`, `select(id)` et le mode `auto_select=False` ; dans le YAML, `selection: manual`.
+
+**Vérifier.** La fenêtre affiche « ID n rouge / vert / violet » ; un clic fait tourner le robot vers la personne choisie, et lui seul.
+
+**Piège.** De près, la tête sort de l'image et la bande du tronc tombe sur le jean : la personne verte devient « bleu ». Ne voter avec le tronc que si le haut de la bbox est visible.
+
+### Étape 19 — Retrouver la cible après une occlusion
+
+**But.** Que le robot ne perde pas sa cible quand quelqu'un passe devant.
+
+**À faire.**
+
+1. Copier `bytetrack.yaml` d'Ultralytics dans `config/bytetrack_person.yaml` avec `track_buffer: 90` ; paramètre `tracker_dir` passé par le launch pour que `detector_node` trouve ce fichier.
+2. Dans `TargetLock` : mémoriser la couleur de la cible et les IDs vus en même temps qu'elle (sauf ceux qui la chevauchent fortement) ; ré-identifier une nouvelle piste de même couleur ; refuser un ID qui a changé de couleur.
+3. Un test par cas : ré-identification, après le délai, personne de même couleur vue avec la cible, vol d'ID, doublon.
+
+**Vérifier.** Choisir une personne et attendre qu'une autre passe devant : la fenêtre reste sur « suivie », ou affiche brièvement « perdue » puis la même personne sous un autre ID. Le log affiche `Cible re-identifiee par ses vetements`.
+
+**Piège.** Une personne tout près de la caméra peut avoir deux boîtes (deux IDs) en même temps. Si l'on classe tout ID vu avec la cible comme « autre personne », on écarte son doublon.
+
+### Étape 20 — Enregistrer une démo
+
+**But.** Une vidéo qui montre le résultat.
+
+**À faire.** Enregistrer l'écran (Ctrl+Alt+Maj+R sous Ubuntu), puis avec `ffmpeg` : une version accélérée ×2 (`setpts=0.5*PTS`), un GIF court pour le README (`palettegen` / `paletteuse`), et des images pour le rapport (`-ss <temps> -frames:v 1`). Relire les logs ROS (`~/.ros/log`) pour dater les événements visibles dans la vidéo.
+
+**Piège.** L'enregistrement charge l'ordinateur : Gazebo tombe à 0,4 × le temps réel. La version ×2 ressemble plus au temps réel.
+
 ### Et ensuite
 
 | Phase | Ce qui s'ajoute | Annexe à compléter |
 |---|---|---|
 | 1 (fin) | Test sur le vrai robot avec une vraie balle, rosbags réels | Seuils HSV réels, montage de la webcam |
-| 2 | Backend YOLO dans `detector_node` (classe « person ») | Installation d'Ultralytics, mesure des FPS |
-| 3 | Lib SORT (Kalman + hongrois) et `tracker_node` ; `target_selector_node` lit `/tracks` | Tests de la lib, gestion des occlusions |
-| 4 | Contrôleur PI, mode recherche, fusion LiDAR, ré-identification | Calibration caméra-LiDAR |
+| 2–3 | ✅ Fait en simulation : étapes 16 à 19 | — |
+| 3 (option) | Lib SORT codée soi-même, comparée à ByteTrack | Tests de la lib, gestion des occlusions |
+| 4 | Contrôleur PI, mode recherche, recul, ré-identification plus robuste que la couleur | Calibration caméra-LiDAR, montage de la caméra en haut sur le vrai robot |
 | 5 | Tableau sim / réel / baseline, vidéo | — |

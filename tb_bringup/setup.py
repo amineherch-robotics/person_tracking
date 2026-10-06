@@ -32,6 +32,7 @@ setup(
     entry_points={
         'console_scripts': [
             'ball_joystick = tb_bringup.ball_joystick:main',
+            'target_chooser = tb_bringup.target_chooser:main',
         ],
     },
 )
