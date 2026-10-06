@@ -1,6 +1,6 @@
 import math
 
-from tb_control.follower_law import FollowerParams, compute_command, rate_limit
+from tb_control.follower_law import FollowerParams, compute_command, rate_limit, search_command
 
 P = FollowerParams()
 
@@ -52,3 +52,13 @@ def test_unknown_distance_does_not_advance():
 def test_rate_limit_sec03():
     assert rate_limit(0.0, 1.0, max_rate=0.3, dt=0.05) == 0.3 * 0.05
     assert rate_limit(0.1, 0.1, max_rate=0.3, dt=0.05) == 0.1
+
+
+def test_no_search_by_default():
+    assert search_command(0.5, P) == (0.0, 0.0)
+
+
+def test_search_spins_in_place_on_the_side_it_left_ef07():
+    p = FollowerParams(search_angular=0.4)
+    assert search_command(-0.01, p) == (0.0, -0.4)
+    assert search_command(0.3, p) == (0.0, 0.4)

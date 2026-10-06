@@ -2,6 +2,7 @@
 
 Securite : SEC-01 watchdog, SEC-02 saturation, SEC-03 limitation d'acceleration,
 SEC-04 distance minimale, SEC-05 arret d'urgence via /follower/enable (voir estop_keyboard).
+Cible perdue depuis plus de lost_timeout (SEARCHING) : rotation sur place si search_angular > 0 (EF-07).
 """
 
 import rclpy
@@ -12,7 +13,7 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from std_msgs.msg import Bool
 
-from tb_control.follower_law import FollowerParams, compute_command, rate_limit
+from tb_control.follower_law import FollowerParams, compute_command, rate_limit, search_command
 from tb_interfaces.msg import TargetState
 
 
@@ -75,8 +76,13 @@ class FollowerController(Node):
             reason = 'aucune cible recue'
         elif (now - self.target_rx_time).nanoseconds * 1e-9 > self.watchdog_timeout:
             reason = 'watchdog : plus de cible ni d\'image'
+        elif self.target.state == TargetState.STATE_LOST:
+            reason = 'cible cachee'
+        elif self.target.state == TargetState.STATE_SEARCHING:
+            reason = 'cible perdue : recherche en tournant' if self.params.search_angular > 0.0 else 'cible perdue'
+            v_target, w_target = search_command(self.target.bearing, self.params)
         elif self.target.state != TargetState.STATE_LOCKED:
-            reason = 'cible perdue'
+            reason = 'aucune cible choisie'
         else:
             reason = None
             v_target, w_target = compute_command(self.target.bearing, self.target.distance, self.params)
@@ -84,6 +90,8 @@ class FollowerController(Node):
         if reason != self.stopped_reason:
             if reason is None:
                 self.get_logger().info('Suivi de la cible')
+            elif reason.startswith('cible perdue : recherche'):
+                self.get_logger().info(reason.capitalize())
             else:
                 self.get_logger().warn(f'Arret : {reason}')
             self.stopped_reason = reason

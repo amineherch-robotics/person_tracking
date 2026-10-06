@@ -33,3 +33,4 @@ follower_controller:
     max_angular_accel: 2.0
     min_distance: 0.5
     max_reverse: 0.0          # m/s ; ex. 0.05 pour reculer quand la cible avance (decision en attente)
+    search_angular: 0.0       # rad/s : recherche en tournant (EF-07) ; 0 = desactivee tant que non testee en reel (ex. 0.3)

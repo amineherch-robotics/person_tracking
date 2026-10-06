@@ -27,3 +27,4 @@ follower_controller:
     max_angular_accel: 2.0    # rad/s^2 (SEC-03)
     min_distance: 0.5         # m (SEC-04)
     max_reverse: 0.0          # m/s ; ex. 0.05 pour reculer quand la cible avance (decision en attente)
+    search_angular: 0.4       # rad/s : cible perdue > lost_timeout -> tourne sur place pour la retrouver (EF-07)

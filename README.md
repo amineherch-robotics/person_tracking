@@ -71,7 +71,8 @@ ros2 launch tb_bringup bringup.launch.py mode:=sim            # target:=person p
 Une fenêtre **« Choisir la personne a suivre »** s'ouvre : chaque personne détectée y apparaît avec son ID et la couleur de ses vêtements. **Cliquer sur une personne** (ou sur son bouton) pour que le robot la suive ; « Arreter le suivi » pour arrêter. Tant que personne n'est choisi, le robot ne bouge pas.
 
 - Sans la fenêtre : `chooser:=false`, puis `ros2 topic pub --once /target/select std_msgs/msg/Int32 "{data: 3}"` (−1 = arrêter).
-- Si la cible est cachée et revient avec un autre ID, elle est retrouvée par la couleur de ses vêtements (log `Cible re-identifiee par ses vetements`).
+- Une personne cachée ou sortie de l'image **garde son ID** quand elle revient (reconnue par la couleur de ses vêtements, jusqu'à 60 s ; log `Personne n reconnue`).
+- Cible perdue depuis plus de 2 s : le robot tourne sur place pour la chercher (`search_angular`, 0,4 rad/s en simulation).
 - Distance : LiDAR jusqu'à 3,5 m ; au-delà, hauteur de la silhouette.
 - Monde : pièce de 18 × 14 m, trois personnes (pulls rouge, vert, violet) qui marchent entre 4 et 12 m du robot.
 
@@ -176,7 +177,7 @@ Pour que la latence affichée soit juste, les horloges du robot et du laptop doi
 
 ```bash
 cd ~/turtlebot3_ws/src/person_tracking
-for p in tb_perception tb_tracking tb_control tb_bringup; do (cd $p && python3 -m pytest -q test); done   # 42 tests
+for p in tb_perception tb_tracking tb_control tb_bringup; do (cd $p && python3 -m pytest -q test); done   # 57 tests
 ```
 
 ## Rapport

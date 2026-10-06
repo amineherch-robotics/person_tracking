@@ -6,7 +6,7 @@ Pour comprendre comment fonctionne ce qui a été construit : **annexes pédagog
 
 Sections : 1. Présentation et plan · 2. État d'avancement · 3. Journal · 4. Problèmes et solutions · 5. Points ouverts · 6. Prochaines étapes · Annexes A à E.
 
-**Dernière mise à jour :** 6 octobre 2026 (soir) · **Phase en cours :** en simulation, le robot détecte les personnes (YOLO), leur donne un ID et une couleur de vêtements, l'utilisateur choisit qui suivre, et la cible est retrouvée après une occlusion ; test réel de la Phase 1 en attente
+**Dernière mise à jour :** 6 octobre 2026 (nuit) · **Phase en cours :** en simulation, le robot détecte les personnes (YOLO), leur donne un ID et une couleur de vêtements, l'utilisateur choisit qui suivre ; une personne perdue **garde son ID** quand elle revient, et le robot **tourne pour chercher** sa cible perdue ; test réel de la Phase 1 en attente
 
 ## 1. Présentation du projet et plan suivi
 
@@ -78,7 +78,7 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | 0 · Fondations | S1 | Cahier des charges, architecture, simulation Gazebo + caméra | ✅ Terminée |
 | 1 · Pipeline minimal | S2 | Détection couleur, contrôleur P, watchdog, premier test réel, rosbags | ⏳ Simulation validée ; outils du réel prêts (webcam, réglage HSV, rosbags) ; test réel à faire |
 | 2 · Détection YOLO | S3 | YOLO dans ROS2, mesure des FPS en sim et sur rosbags | ✅ En simulation (YOLO26n, 11 images/s avec le suivi) |
-| 3 · Tracking | S4–S6 | Suivi multi-objets, sélection et verrouillage de la cible | ⏳ En simulation : ByteTrack, couleur des vêtements par ID, choix de la personne à la souris, ré-identification par la couleur ; SORT codé soi-même non fait |
+| 3 · Tracking | S4–S6 | Suivi multi-objets, sélection et verrouillage de la cible | ⏳ En simulation : ByteTrack, couleur des vêtements par ID, choix de la personne à la souris, **ID gardé après une perte** (IdentityKeeper), recherche en tournant ; SORT codé soi-même non fait |
 | 4 · Réel et robustesse | S7–S8 | Commande avancée, calibration, occlusions, ré-ID, fusion LiDAR | ⬜ |
 | 5 · Évaluation et livrables | S9 | Tableau sim / réel / baseline, README, vidéo, post LinkedIn | ⬜ |
 
@@ -88,19 +88,19 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 |---|---|---|---|
 | EF-01 | Flux webcam publié dans ROS2 | Must | 🟡 En simulation (`/camera/image_raw`) ; réel à faire |
 | EF-02 | Détection des personnes (bbox + score) | Must | ✅ YOLO26n, en simulation |
-| EF-03 | Identifiant stable par personne | Must | 🟡 Vidéo 2 : la cible garde le même ID pendant 5 min 37 s, malgré les passages des autres personnes. Mais une personne très proche (jambes seules) reçoit plusieurs IDs |
+| EF-03 | Identifiant stable par personne | Must | 🟡 `IdentityKeeper` : une personne qui revient sous une nouvelle piste ByteTrack garde son ID (33 retours reconnus en 3 min). Reste : une personne très proche peut recevoir un ID provisoire ; dernière version à mesurer dans Gazebo |
 | EF-04 | Track maintenu pendant une occlusion ≤ 2 s | Must | 🟡 ByteTrack garde une piste cachée 90 images (≈ 9 s à 10 images/s) ; vidéo 2 : ID gardé quand une personne passe devant la caméra ; pas encore de mesure chiffrée sur une occlusion scriptée |
 | EF-05 | Sélection et verrouillage d'une cible | Must | ✅ L'utilisateur choisit l'ID dans la fenêtre `target_chooser` (ou mode automatique : la plus proche du centre) ; l'ID est gardé même si une autre personne passe au centre |
 | EF-06 | Orientation vers la cible, distance de 1 m | Must | 🟡 Validé en sim sur une balle de tennis (1,00 m) ; personne et réel à faire |
-| EF-07 | Mode recherche si cible perdue > 2 s | Should | 🟡 État SEARCHING publié après 2 s ; rotation pas encore implémentée |
-| EF-08 | Ré-identification après occlusion longue | Should | 🟡 Par la couleur des vêtements : vidéo 1, cible retrouvée sous un nouvel ID (4 → 29) ; limite : deux personnes de même couleur |
+| EF-07 | Mode recherche si cible perdue > 2 s | Should | ✅ En simulation : rotation sur place à 0,4 rad/s du côté où la cible a disparu (`search_angular`) ; désactivé en réel tant que non testé |
+| EF-08 | Ré-identification après occlusion longue | Should | 🟡 Par la couleur des vêtements, jusqu'à 60 s après la disparition, et la personne **garde son ID** ; limite : deux personnes de même couleur |
 | EF-09 | Distance par fusion caméra-LiDAR | Should | 🟡 Rayons du LiDAR dans la direction de la personne ; erreur ≈ +11 cm |
 | EF-10 | Image de debug (bbox, IDs, cible) | Must | ✅ `/detector/debug_image` (bbox + ID) et fenêtre `target_chooser` (ID, couleur, « << CIBLE », état et distance) |
 | EF-11 | Même code en sim et en réel (`mode:=sim/real`) | Must | 🟡 Chaîne complète lancée par `mode:=sim/real` ; réel pas encore testé |
 | EF-12 | Backend de détection couleur (HSV) | Could | ✅ `detector_node backend:=color` |
 | ENF-01 | `header.stamp` d'origine conservé | — | ✅ Recopié jusqu'au contrôleur, latence mesurée |
 | ENF-02 | Paramètres en YAML | — | ✅ Topics, seuils HSV, gains et limites dans `sim.yaml` / `real.yaml` |
-| ENF-03 | Lib indépendante de ROS, testée avec pytest | — | 🟡 42 tests (perception 10, tracking 21, commande 9, bringup 2) ; lib SORT non faite |
+| ENF-03 | Lib indépendante de ROS, testée avec pytest | — | 🟡 57 tests (perception 23, tracking 21, commande 11, bringup 2) ; lib SORT non faite |
 | ENF-05 | Séquences enregistrées en rosbag et rejouables | — | 🟡 `record:=true` (avec `/tracks` et `/target/select`) et rejeu validés en simulation ; rosbags réels à faire |
 | ENF-06 | README reproductible en < 15 min | — | 🟡 Simulation, rosbags et robot réel documentés |
 | SEC-01 | Watchdog | — | ✅ Arrêt en 275 ms après coupure de la caméra |
@@ -111,6 +111,111 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 Légende : ✅ fait · 🟡 partiel · ⏳ en cours · ⬜ pas commencé
 
 ## 3. Journal
+
+### 6 octobre 2026 (nuit) — Une personne garde son ID, même après avoir été perdue
+
+**La demande.** « Je veux qu'il connaisse la personne même si elle est perdue : il donne le même ID et continue à tracker. » Jusqu'ici, une personne cachée puis revenue recevait souvent un **nouvel** ID (7 devenait 12). Le robot la retrouvait par sa couleur, mais l'utilisateur voyait le numéro changer, et rien n'empêchait d'autres confusions.
+
+**Le principe : deux numéros différents.**
+
+| Numéro | Donné par | Stable ? | Où on le voit |
+|---|---|---|---|
+| **Numéro de piste** | ByteTrack | Non : une piste perdue est remplacée par une nouvelle, avec un nouveau numéro | Seulement dans les logs (« piste 67 ») |
+| **Numéro de personne (ID)** | `IdentityKeeper` (nouveau) | Oui : il suit la personne, même si sa piste change | Partout : `/tracks`, fenêtre de choix, image de debug, `/target` |
+
+ByteTrack ne regarde que les positions des boîtes : il ne peut pas savoir qu'une piste nouvelle est une personne déjà vue. La nouvelle couche `IdentityKeeper` (`tb_perception/identity.py`, sans ROS) se place **entre ByteTrack et le reste de la chaîne**. Elle garde en mémoire chaque personne vue (sa couleur, sa dernière position, les personnes vues en même temps qu'elle) et décide, pour chaque piste, à quelle personne elle correspond.
+
+```
+YOLO → ByteTrack ──(pistes 11, 12, 67…)──▶ IdentityKeeper ──(IDs 1, 2, 3)──▶ /tracks
+                                                │
+                       mémoire : personne 1 = rouge, dernière position x = 320 px,
+                                 vue avec 2 et 3 ; personne 2 = vert…
+```
+
+**Les règles, appliquées à chaque image** (dans cet ordre) :
+
+1. **Piste connue → même personne.** C'est le cas normal : tant que ByteTrack suit la personne, rien ne change.
+2. **Doublon qui prend le relais.** Une piste *née à l'intérieur* de la boîte d'une personne (plus de 60 % de recouvrement) est notée comme son doublon possible : par exemple, les jambes détectées à part quand la personne est tout près. Si cette personne disparaît, le doublon reprend son ID, **à condition d'avoir la même couleur**. Sans cette condition, quelqu'un qui réapparaît *derrière* une autre personne (sa boîte naît aussi dans la sienne) pourrait voler son ID.
+3. **Personne perdue qui revient.** Une piste nouvelle peut être reconnue comme une personne absente de l'image depuis moins de 60 s si : (a) elle a **la même couleur** que cette personne ; (b) cette couleur est **fiable** (lue sur le tronc, voir plus bas) ; (c) elle n'a **jamais été vue en même temps** que cette personne, car deux personnes visibles ensemble sont forcément deux personnes différentes. Une piste reste « ouverte » à cette reconnaissance pendant sa première seconde, ou tant que son pull n'a jamais été bien vu. Si plusieurs personnes perdues conviennent, on prend celle dont la dernière position est la plus proche.
+4. **Sinon → nouvelle personne**, avec le numéro suivant.
+
+Quand la règle 2 ou 3 s'applique, le terminal affiche : `Personne 1 reconnue (rouge) : elle revient sous la piste 67, elle garde l'ID 1`.
+
+**Exemple pas à pas.** La rouge (ID 1) est cachée par la verte (ID 2), puis revient.
+
+| Image | Pistes ByteTrack | Décision d'IdentityKeeper | IDs publiés |
+|---|---|---|---|
+| 1 | 11 rouge, 12 vert | Pistes connues (règle 1). Mémoire : 1 et 2 vues ensemble | 1, 2 |
+| 2 | 12 vert | La personne 1 est absente | 2 |
+| 3 | 12 vert, **67** rouge (nouvelle) | 67 est nouvelle, rouge, couleur fiable ; la personne 1 est absente, rouge, jamais vue avec 67 → c'est elle (règle 3) | 2, **1** |
+
+Pour le robot, rien ne s'est passé : la cible est toujours l'ID 1.
+
+**Une couleur « fiable » et une couleur « de repli ».** Les essais dans Gazebo (plus bas) ont montré un piège : tout près de la caméra, on ne voit que les jambes, et la couleur lue est celle du jean (« bleu »). Désormais :
+
+- **fiable** = lue sur le tronc, quand la personne est vue en entier (haut de la boîte visible) ;
+- **de repli** = lue sur le haut de la partie visible, quand la personne est coupée par le haut de l'image. Elle sert à l'affichage, mais **ne sert jamais à reconnaître quelqu'un**.
+
+La couleur d'une personne est celle qu'on a **le plus souvent lue** sur toute sa vie, en lectures fiables s'il y en a (un compteur par couleur). Une mauvaise lecture isolée ne la change donc pas.
+
+**Le robot cherche sa cible perdue (EF-07).** L'ID ne sert à rien si la personne est sortie du champ de la caméra : le robot doit tourner pour la revoir. Nouvelle fonction `search_command()` dans `follower_law.py`, et nouveau paramètre `search_angular` :
+
+| État de la cible | Ce que fait le robot | Pourquoi |
+|---|---|---|
+| LOCKED (vue) | Suit la cible (contrôleur P) | — |
+| LOST (cachée depuis moins de 2 s) | **Reste arrêté** | Elle est souvent juste derrière quelqu'un ; son dernier angle n'est plus mis à jour, tourner vers lui ferait dépasser |
+| SEARCHING (perdue depuis plus de 2 s) | **Tourne sur place** à 0,4 rad/s, du côté où elle a disparu (signe de son dernier angle), sans avancer | Elle est probablement sortie du champ de la caméra (±35°) |
+
+`search_angular` vaut 0,4 rad/s en simulation et 0 (désactivé) dans `real.yaml`, tant que ce n'est pas testé sur le vrai robot. La rotation sur place est sans danger pour les obstacles devant le robot (il n'avance pas), et toutes les sécurités restent actives (watchdog, arrêt d'urgence, rampe d'accélération).
+
+**Fichiers modifiés**
+
+| Fichier | Changement |
+|---|---|
+| `tb_perception/identity.py` (nouveau) | Classes `TrackBox`, `Person`, `IdentityKeeper` ; fonction `overlap()` |
+| `tb_perception/detector_node.py` | Publie l'ID de personne (`/tracks`, `/detections`, image de debug) ; `vote_color()` rend aussi « fiable ou non » ; log « Personne n reconnue » |
+| `tb_perception/test/test_identity.py` (nouveau) | 13 tests |
+| `tb_control/follower_law.py`, `follower_controller.py` | `search_command()`, paramètre `search_angular`, états LOST / SEARCHING distingués dans les logs |
+| `tb_control/test/test_follower_law.py` | 2 tests ajoutés |
+| `config/target_person.yaml` | `identity_memory: 60.0`, `identity_provisional_time: 1.0` |
+| `config/sim.yaml`, `real.yaml` | `search_angular: 0.4` (simulation), `0.0` (réel) |
+
+Le reste de la chaîne ne change pas : `target_selector_node` et la fenêtre de choix reçoivent simplement des IDs qui ne changent plus. La ré-identification par la couleur de `TargetLock` (journal précédent) reste en place, comme filet de sécurité.
+
+**Les 13 tests d'IdentityKeeper.** Chaque test reproduit une situation, souvent vue dans Gazebo :
+
+| Situation | Résultat attendu |
+|---|---|
+| Deux personnes différentes | Deux IDs (1, 2), gardés image après image |
+| La rouge, cachée, revient sous une nouvelle piste | Elle garde l'ID 1 |
+| Retour après 45 s / après 70 s | ID gardé / nouvel ID (mémoire de 60 s) |
+| Couleur lue une image trop tard | ID provisoire, puis l'ID 1 dès que la couleur est lue |
+| Une ancienne piste change de couleur | Son ID ne change pas |
+| Deux personnes en rouge vues ensemble | Jamais confondues |
+| Doublon (corps + jambes) de la rouge | Il reprend l'ID 1 quand son pull est lu « rouge », pas avant |
+| Personne réapparue derrière une autre | Ne vole pas l'ID de celle de devant |
+| Deux personnes perdues de même couleur | On rend l'ID de la plus proche |
+| Lecture « bleu » isolée sur la rouge | Sa couleur reste rouge |
+| La rouge revient tout près (jambes seules) | ID provisoire pendant 3 s, puis l'ID 1 dès que son pull est visible |
+| Couleur de repli « bleu » | Ne reconnaît jamais une personne en pull bleu |
+
+Au total, 57 tests : perception 23, tracking 21, commande 11, bringup 2.
+
+**Essais dans Gazebo, et ce qu'ils ont appris.** Simulation sans fenêtre, environ 3 min par essai. Un script choisit la première personne rouge, puis compte image par image les IDs publiés et l'état de la cible. Chaque essai a révélé un défaut, corrigé avant l'essai suivant.
+
+| Essai | Version | Ce qu'on a mesuré | Défaut trouvé → correction |
+|---|---|---|---|
+| 1 | Couleur = la dernière lue | Cible gardée sous l'ID 1 dans 1 574 messages sur 1 576 ; retours reconnus sous les pistes 67 et 70. Mais 8 IDs pour 3 personnes (la verte en a 4), et la cible « introuvable » 74 % du temps | La rouge a été « reconnue (bleu) » : sa couleur mémorisée dérivait (jean lu de près) → couleur **la plus lue**, pas la dernière. Le robot attendait sans chercher → **rotation de recherche** |
+| 2 | + couleur la plus lue, + recherche | Recherche déclenchée 4 fois ; la cible encore « introuvable » 57 % du temps ; l'ID 2 (verte) lu 30 fois « rouge » | Une personne réapparue *derrière* une autre était prise pour son doublon → doublon seulement **si même couleur** |
+| 3 | + condition de couleur des doublons | 3 personnes → surtout 3 IDs (1, 2, 3) ; 33 retours reconnus. Cible visible 46 % du temps ; rouge visible sous un autre ID 12 % du temps ; aucune rouge visible 42 % ; plus longue recherche 28 s | La rouge, revenue tout près (jambes lues « bleu »), est devenue l'ID 7, puis l'ID 1 de nouveau (par `TargetLock`) → couleur **fiable / de repli** |
+| 4 | + couleur fiable | **Pas encore mesuré** : essai arrêté pour que l'utilisateur teste lui-même | — |
+
+**Ce qu'il reste à vérifier ou à améliorer**
+
+- **Mesurer la dernière version dans Gazebo** (essai 4), avec la vérité terrain : à chaque image, quelle vraie personne porte l'ID suivi ?
+- **Cible hors de l'image 42 % du temps** (essai 3). La rotation de recherche aide, mais la personne rouge marche autour du robot, et une rotation à 0,4 rad/s met environ 16 s pour faire un tour. Pistes : tourner plus vite au début, ou utiliser le LiDAR (qui voit à 360°) pour savoir de quel côté chercher.
+- **Deux personnes habillées pareil** restent la limite principale (point ouvert n° 13).
+- **Une nouvelle personne de la même couleur** qu'une personne perdue depuis moins de 60 s recevrait son ID. Dans notre monde, chaque couleur est unique.
 
 ### 6 octobre 2026 (soir) — Choisir la personne à suivre, et la retrouver après une occlusion
 
@@ -468,6 +573,10 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 | Cible perdue quand quelqu'un passe devant | La cible revient sous un nouvel ID ; en mode manuel, le robot attendait l'ancien | `track_buffer` 90 + ré-identification par la couleur + garde contre le vol d'ID |
 | Ré-identification sur un doublon (vidéo 1) | Personne très proche détectée deux fois (corps + jambes) : son 2e ID était écarté comme « autre personne » | Une boîte qui chevauche fortement la cible n'est plus classée « autre personne » |
 | Test de couleur qui échoue une fois sur deux | Autant de pixels rouges que bleus dans la bande : égalité départagée au hasard | Test corrigé (2/3 de jean dans la bande) |
+| Personne revenue sous un nouvel ID (7 → 12) | ByteTrack ne regarde que les positions : une piste perdue est remplacée par une nouvelle | Couche `IdentityKeeper` : un ID de personne, distinct du numéro de piste, rendu à la personne qui revient |
+| Couleur mémorisée qui dérive (« reconnue (bleu) ») | Couleur = dernière lue ; de près, on lit le jean | Couleur la plus lue sur toute la vie de la personne, en lectures fiables (tronc visible) |
+| ID volé par une personne réapparue derrière une autre | Sa boîte naît dans celle de devant : prise pour un doublon | Doublon accepté seulement s'il a la même couleur |
+| Cible hors de l'image : le robot attend sans fin | Pas de mode recherche | Rotation sur place en SEARCHING (`search_angular`) |
 | `pkill -f` tue le terminal qui le lance | Le motif apparaît aussi dans la ligne de commande du terminal | Arrêter les processus par leur numéro (PID) |
 
 ## 5. Points ouverts et décisions à prendre
@@ -488,13 +597,15 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 13. **Deux personnes habillées de la même couleur** : la ré-identification par la couleur ne peut pas les distinguer. Pistes : comparer aussi la couleur du bas du corps, la taille, la position prévue ; ou un vrai modèle de ré-identification (comme DeepSORT).
 14. **Couleur fausse de très près** (rouge lu « bleu » ou « orange ») : n'accepter un vote que si le tronc est assez visible, ou garder la couleur mémorisée au moment du choix.
 15. **À-coups dus au watchdog** (~70 arrêts brefs par session) : le délai de 0,3 s est court pour un détecteur à 7–10 images/s. Options : rendre la détection plus rapide (point 12), ou un délai propre au mode personne (sans dépasser l'arrêt en moins de 0,5 s exigé par SEC-01).
-16. **Vérifier dans Gazebo la correction des doublons** (faite après les vidéos, seulement testée par pytest).
+16. **Vérifier dans Gazebo la dernière version** (ID gardé, couleur fiable) : essai 4, avec la vérité terrain.
+17. **Cible hors de l'image 42 % du temps** malgré la recherche : tourner plus vite au début, ou chercher du côté indiqué par le LiDAR (360°).
+18. **Recherche sur le vrai robot** : `search_angular` vaut 0 dans `real.yaml` ; à activer (ex. 0,3 rad/s) lors du test réel, zone dégagée.
 
 ## 6. Prochaines étapes
 
 **Suivi de personne (simulation)**
 
-- Rejouer le scénario de la vidéo 1 pour vérifier la correction des doublons.
+- Mesurer la dernière version (ID gardé après une perte) dans Gazebo, avec la vérité terrain, puis en vidéo.
 - Décider du recul (`max_reverse`) : c'est maintenant le principal défaut quand la personne marche vers le robot.
 - Mesurer une occlusion scriptée (EF-04) : durée de l'occlusion, ID gardé ou retrouvé, temps pour retrouver la cible.
 - Gagner en vitesse (pilote NVIDIA ou OpenVINO) pour réduire les à-coups du watchdog.
@@ -656,6 +767,10 @@ Autour de la formule du contrôleur, le node applique plusieurs protections :
 | Pas de recul | La caméra ne voit pas derrière | v ≥ 0 |
 | Watchdog (SEC-01) | Arrêt immédiat si aucune cible reçue depuis 0,3 s | 0,3 s |
 | Arrêt d'urgence (SEC-05) | `estop_keyboard` publie `false` sur `/follower/enable` | touche espace |
+| Cible cachée (LOST) | Le robot s'arrête et attend | moins de 2 s |
+| Recherche (SEARCHING, EF-07) | Rotation sur place, sans avancer, du côté où la cible a disparu | 0,4 rad/s en simulation ; désactivée en réel (`search_angular: 0.0`) |
+
+**Pourquoi tourner du « côté où elle a disparu » ?** Le dernier angle connu de la cible dit où elle était dans l'image juste avant de disparaître. Positif (à gauche) : elle est sans doute sortie par la gauche, donc le robot tourne à gauche. Exemple : dernier angle −0,3 rad (à droite) → ω = −0,4 rad/s, le robot tourne vers la droite jusqu'à la revoir. Il faut environ 16 s pour un tour complet (2π / 0,4).
 
 ### Étape 5 — Faire tourner les roues
 
@@ -669,8 +784,9 @@ Les étapes 1 à 5 décrivent la chaîne de la balle. Pour une personne, la form
 /camera/image_raw
    ▼
 detector_node (backend yolo)    YOLO26n trouve les personnes        « où sont les personnes ? »
-                                ByteTrack leur donne un ID          « qui est qui d'une image à l'autre ? »
+                                ByteTrack leur donne un n° de piste « qui est qui d'une image à l'autre ? »
                                 clothing_color lit leur pull        « de quelle couleur est chacune ? »
+                                IdentityKeeper donne l'ID final     « ai-je déjà vu cette personne ? »
    │  /tracks                   TrackArray (ID, bbox, couleur)
    ├────────────────────────▶ target_chooser (fenêtre)    l'utilisateur clique sur une personne
    │                               │  /target/select     Int32 (l'ID choisi, -1 = arrêter)
@@ -689,9 +805,26 @@ follower_controller  →  /cmd_vel  →  roues
 
 **Étape 2 ter — La couleur des vêtements.** Pour chaque ID, `clothing_color()` lit le tronc de la personne et donne le nom de sa couleur (méthode détaillée dans le journal). Le node garde les 15 dernières réponses de chaque ID et publie la plus fréquente. Exemple : les 15 dernières images de l'ID 4 ont donné 12 × « rouge », 2 × « orange » et 1 × « bleu » : la couleur publiée est « rouge ». Une erreur isolée ne change rien.
 
+**Étape 2 quater bis — Garder le même ID à une personne qui revient** (`identity.py`, sans ROS, 13 tests). ByteTrack donne des **numéros de piste**. Quand une personne est cachée trop longtemps, sa piste est supprimée ; à son retour, ByteTrack crée une nouvelle piste avec un nouveau numéro. `IdentityKeeper` transforme ces numéros de piste en **numéros de personne**, qui eux ne changent pas.
+
+Il garde une petite fiche par personne :
+
+| Champ de la fiche | Exemple | Sert à |
+|---|---|---|
+| ID | 1 | Le numéro publié partout |
+| Couleur (la plus lue) | rouge (lue 390 fois rouge, 2 fois orange) | Reconnaître la personne à son retour |
+| Lectures fiables / de repli | 390 / 155 | Ne pas se fier au jean lu de près |
+| Dernière position | x = 320 px | Choisir la plus proche si deux fiches conviennent |
+| Vue pour la dernière fois | il y a 4 s | Oublier la personne après 60 s |
+| Vue en même temps que | 2, 3 | Ne jamais la confondre avec elles |
+
+À chaque image, pour chaque piste : piste connue → même personne ; sinon, une fiche d'une personne **absente**, de la **même couleur fiable**, **jamais vue avec cette piste** ? → on lui rend son ID ; sinon → nouvelle fiche, nouvel ID. (Règles complètes et exemple dans le journal du 6 octobre, nuit.)
+
+C'est le même raisonnement que celui d'une personne qui surveille une salle : « quelqu'un en pull rouge est sorti il y a 10 s, quelqu'un en pull rouge entre : c'est sans doute lui ». Et « deux personnes en rouge présentes en même temps, ce sont deux personnes ».
+
 **Étape 2 quater — L'utilisateur choisit.** `target_chooser` dessine les `/tracks` sur l'image. Un clic dans un rectangle, ou sur un bouton « ID n », publie ce numéro sur `/target/select`.
 
-**Étape 3 bis — Verrouiller la cible et la retrouver** (`target_lock.py`, sans ROS, 15 tests). À chaque image, `TargetLock.update()` reçoit la liste des pistes et rend un **état** : IDLE (rien de choisi), LOCKED (vue), LOST (cachée depuis moins de 2 s), SEARCHING (cachée depuis plus longtemps). Il retient trois choses : l'ID suivi, la **couleur** de la cible, et les IDs vus **en même temps** qu'elle (ce sont d'autres personnes).
+**Étape 3 bis — Verrouiller la cible et la retrouver** (`target_lock.py`, sans ROS, 15 tests). *Depuis l'ajout d'IdentityKeeper, la cible garde normalement son ID ; la ré-identification décrite ici reste un filet de sécurité.* À chaque image, `TargetLock.update()` reçoit la liste des pistes et rend un **état** : IDLE (rien de choisi), LOCKED (vue), LOST (cachée depuis moins de 2 s), SEARCHING (cachée depuis plus longtemps). Il retient trois choses : l'ID suivi, la **couleur** de la cible, et les IDs vus **en même temps** qu'elle (ce sont d'autres personnes).
 
 Exemple : la cible est l'ID 7, rouge ; l'ID 8 (vert) passe devant elle.
 
@@ -918,7 +1051,13 @@ Dans un cas aussi net, on pourrait associer « à la main ». L'algorithme devie
 | **ByteTrack** | Tracker utilisé par Ultralytics : comme SORT (Kalman + association), mais il utilise aussi les détections peu sûres en seconde passe, ce qui rattrape les personnes à moitié cachées. |
 | **`model.track()`** | Fonction d'Ultralytics qui fait détection + suivi en un appel ; `persist=True` garde les pistes d'une image à l'autre. |
 | **track_buffer** | Nombre d'images pendant lesquelles ByteTrack garde une piste sans détection. Ultralytics le compte à 30 images/s ; à 10 images/s réelles, 90 (notre réglage) ≈ 9 s. |
-| **Piste (track)** | Une personne suivie par le tracker : un ID, une bbox, une vitesse, une durée de vie. |
+| **Piste (track)** | Une personne suivie par le tracker : un numéro, une bbox, une vitesse, une durée de vie. Une piste perdue trop longtemps est supprimée. |
+| **Numéro de piste / ID de personne** | Numéro de piste : donné par ByteTrack, il change si la piste est perdue. ID de personne : donné par `IdentityKeeper`, il reste le même quand la personne revient. C'est l'ID de personne qui est publié. |
+| **Fiche (mémoire) d'une personne** | Ce qu'IdentityKeeper retient de chaque personne : couleur, dernière position, dernière fois vue, personnes vues avec elle. Oubliée après 60 s d'absence. |
+| **Couleur fiable / de repli** | Fiable : lue sur le tronc d'une personne vue en entier. De repli : lue sur le haut de la partie visible d'une personne coupée par l'image (souvent fausse de près). Seule la couleur fiable sert à reconnaître quelqu'un. |
+| **Piste provisoire** | Piste jeune (moins de 1 s) ou dont le pull n'a jamais été bien vu : elle peut encore être reconnue comme une personne connue. |
+| **Mode recherche** | Comportement du robot quand la cible est perdue depuis plus de 2 s : rotation sur place pour la faire revenir dans le champ de la caméra (EF-07). |
+| **Compteur (Counter)** | Structure Python qui compte combien de fois chaque valeur apparaît ; `most_common(1)` donne la plus fréquente. |
 | **Verrouillage (lock)** | Suivre un ID précis, sans changer de cible quand une autre personne est mieux placée. |
 | **Sélection manuelle / automatique** | Manuelle : l'utilisateur choisit l'ID. Automatique : la personne la plus proche du centre de l'image. |
 | **Ré-identification par la couleur** | Retrouver la cible revenue sous un nouvel ID en comparant la couleur de ses vêtements à celle mémorisée. Version simple de la ré-identification par l'apparence. |
@@ -987,10 +1126,10 @@ Pour voir ce graphe en direct : `ros2 run rqt_graph rqt_graph`.
 
 | Node | Rôle | Reçoit | Envoie |
 |---|---|---|---|
-| `detector_node`<br>*`tb_perception`*<br>lancé par `bringup.launch.py` | Balle : seuillage HSV. Personnes : YOLO26n + ByteTrack (un ID par personne) et couleur des vêtements de chaque ID | `/camera/image_raw` | `/detections` (balle) ou `/tracks` (personnes), `/detector/debug_image` |
+| `detector_node`<br>*`tb_perception`*<br>lancé par `bringup.launch.py` | Balle : seuillage HSV. Personnes : YOLO26n + ByteTrack (numéros de piste), couleur des vêtements, et IdentityKeeper (un ID de personne stable, rendu à la personne qui revient) | `/camera/image_raw` | `/detections` (balle) ou `/tracks` (personnes), `/detector/debug_image` |
 | `target_selector_node`<br>*`tb_tracking`*<br>lancé par `bringup.launch.py` | Choisit la cible (balle : meilleure détection ; personne : l'ID choisi, retrouvé par sa couleur après une occlusion), calcule son angle et sa distance (LiDAR pour une personne) ; gère l'état IDLE / LOCKED / LOST / SEARCHING | `/detections` ou `/tracks`, `/target/select`, `/scan`, `/camera/camera_info` | `/target` |
 | `target_chooser`<br>*`tb_bringup`*<br>lancé par `bringup.launch.py` avec `target:=person` (`chooser:=false` pour ne pas l'ouvrir) | Fenêtre Tkinter : image de la caméra avec les personnes (« ID n couleur »), clic pour choisir qui suivre, état et distance de la cible | `/camera/image_raw`, `/tracks`, `/target` | `/target/select` |
-| `follower_controller`<br>*`tb_control`*<br>lancé par `bringup.launch.py` | Calcule les vitesses (contrôleur P) et applique toutes les sécurités (watchdog, saturation, rampe) | `/target`, `/follower/enable` | `/cmd_vel` |
+| `follower_controller`<br>*`tb_control`*<br>lancé par `bringup.launch.py` | Calcule les vitesses (contrôleur P), tourne sur place pour chercher une cible perdue (SEARCHING), et applique toutes les sécurités (watchdog, saturation, rampe) | `/target`, `/follower/enable` | `/cmd_vel` |
 | `estop_keyboard`<br>*`tb_control`*<br>lancé par à la main : `ros2 run tb_control estop_keyboard` | Arrêt d'urgence au clavier : `g` active, espace arrête | — | `/follower/enable`, `/cmd_vel` (commande nulle à l'arrêt) |
 | `ros_gz_bridge`<br>*`ros_gz_bridge` (ROS)*<br>lancé par `sim.launch.py` | Traduit les topics Gazebo ↔ ROS 2 selon `config/gz_bridge.yaml` | `/cmd_vel`, `/ball/cmd_vel` | `/clock`, `/odom`, `/tf`, `/scan`, `/imu`, `/joint_states`, `/camera/camera_info` |
 | `ros_gz_image`<br>*`ros_gz_image` (ROS)*<br>lancé par `sim.launch.py` | Traduit l'image de la caméra Gazebo en image ROS ; crée aussi les variantes compressées | — | `/camera/image_raw` (+ `/compressed`, `/zstd`…) |
@@ -1031,7 +1170,7 @@ Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système
 |---|---|---|---|
 | `/detections`<br>*`vision_msgs/Detection2DArray`* | `detector_node` → `target_selector_node` | Liste des objets trouvés dans l'image : bbox (centre, taille en pixels), classe (`tennis_ball`), score. Liste vide si rien n'est vu | une par image |
 | `/detector/debug_image`<br>*`sensor_msgs/Image`* | `detector_node` → `rqt_image_view`, RViz | L'image avec la bbox dessinée. Calculée seulement si quelqu'un écoute | une par image |
-| `/tracks`<br>*`tb_interfaces/TrackArray`* | `detector_node` (`target:=person`) → `target_selector_node`, `target_chooser` | Les personnes suivies : ID, bbox, score, et **couleur des vêtements** (`color`, ex. « rouge ») | une par image traitée (7–11 Hz) |
+| `/tracks`<br>*`tb_interfaces/TrackArray`* | `detector_node` (`target:=person`) → `target_selector_node`, `target_chooser` | Les personnes suivies : **ID de personne** (stable, même après une perte), bbox, score, et **couleur des vêtements** (`color`, ex. « rouge ») | une par image traitée (7–11 Hz) |
 | `/target/select`<br>*`std_msgs/Int32`* | `target_chooser` (ou `ros2 topic pub`) → `target_selector_node` | L'ID de la personne à suivre ; −1 = arrêter le suivi | à chaque clic |
 | `/target`<br>*`tb_interfaces/TargetState`* | `target_selector_node` → `follower_controller` | La cible : état (IDLE, LOCKED, LOST, SEARCHING), angle (rad), distance (m), bbox, temps depuis la dernière vue | une par image |
 | `/cmd_vel`<br>*`geometry_msgs/TwistStamped`* | `follower_controller` → `ros_gz_bridge` → roues | La commande : vitesse d'avance `v` (m/s) et de rotation `ω` (rad/s), avec l'heure | 20 Hz |
@@ -1057,7 +1196,7 @@ Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système
 
 ## Annexe E — Refaire tout le projet seul, étape par étape
 
-Ce guide reprend le projet depuis une machine vierge jusqu'au robot qui suit la balle (étapes 0 à 15), puis une personne choisie (étapes 16 à 20), en simulation. Chaque étape a la même structure :
+Ce guide reprend le projet depuis une machine vierge jusqu'au robot qui suit la balle (étapes 0 à 15), puis une personne choisie qui garde son ID et qu'il cherche s'il la perd (étapes 16 à 22), en simulation. Chaque étape a la même structure :
 
 - **But** : ce qu'on construit.
 - **À faire** : les commandes et les fichiers.
@@ -1452,12 +1591,38 @@ Dans `bringup.launch.py` : un argument `mode` (`sim` ou `real`) qui inclut `sim.
 
 **Piège.** L'enregistrement charge l'ordinateur : Gazebo tombe à 0,4 × le temps réel. La version ×2 ressemble plus au temps réel.
 
+### Étape 21 — Garder le même ID à une personne qui revient
+
+**But.** Une personne cachée puis revenue garde son numéro.
+
+**À faire.**
+
+1. `identity.py` (sans ROS) : `TrackBox` (une piste dans une image : numéro, bbox, couleur, fiable ?), `Person` (la fiche), `IdentityKeeper.update(boites, t)` qui rend `{numéro de piste: ID de personne}`.
+2. Écrire les tests **avant** de brancher le node, un par situation (retour, doublon, même couleur vue ensemble, personne cachée derrière, jambes seules…).
+3. Dans `detector_node` : appeler `update()` à chaque image, publier l'ID de personne dans `Track.id`, et logger les retours.
+4. `vote_color()` rend aussi si la couleur est fiable (votée sur le tronc) ou de repli.
+
+**Vérifier.** Dans Gazebo, `ros2 topic echo /tracks --field tracks` : pour 3 personnes, surtout les IDs 1, 2 et 3. Le log « Personne n reconnue … elle garde l'ID n » apparaît quand une personne revient.
+
+**Piège.** Trois défauts trouvés seulement dans Gazebo, chacun corrigé par une règle :
+- la couleur mémorisée doit être la plus lue, pas la dernière ;
+- un doublon doit avoir la même couleur pour reprendre un ID ;
+- une couleur lue sur une personne coupée (jambes seules) ne doit jamais servir à reconnaître quelqu'un.
+
+### Étape 22 — Chercher la cible perdue
+
+**But.** Le robot tourne pour retrouver une cible sortie du champ de la caméra (EF-07).
+
+**À faire.** Dans `follower_law.py`, `search_command(angle, params)` → `(0, ±search_angular)`, avec un test. Dans `follower_controller`, appeler cette fonction quand l'état est SEARCHING (et rester arrêté en LOST). Paramètre `search_angular` : 0,4 dans `sim.yaml`, 0 dans `real.yaml`.
+
+**Vérifier.** Pousser la cible hors de l'image (ou attendre qu'elle sorte) : après 2 s, le log affiche « Cible perdue : recherche en tournant » et le robot tourne du côté où elle est partie, puis repart dès qu'il la revoit.
+
 ### Et ensuite
 
 | Phase | Ce qui s'ajoute | Annexe à compléter |
 |---|---|---|
 | 1 (fin) | Test sur le vrai robot avec une vraie balle, rosbags réels | Seuils HSV réels, montage de la webcam |
-| 2–3 | ✅ Fait en simulation : étapes 16 à 19 | — |
+| 2–3 | ✅ Fait en simulation : étapes 16 à 22 | — |
 | 3 (option) | Lib SORT codée soi-même, comparée à ByteTrack | Tests de la lib, gestion des occlusions |
 | 4 | Contrôleur PI, mode recherche, recul, ré-identification plus robuste que la couleur | Calibration caméra-LiDAR, montage de la caméra en haut sur le vrai robot |
 | 5 | Tableau sim / réel / baseline, vidéo | — |

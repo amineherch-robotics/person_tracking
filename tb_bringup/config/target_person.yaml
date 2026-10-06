@@ -16,6 +16,10 @@ detector_node:
     # ou une config du dossier config/ : bytetrack_person.yaml garde les pistes cachees plus longtemps
     tracker: bytetrack_person.yaml
     track_conf: 0.1           # ByteTrack utilise aussi les detections peu sures (2e passe d'association)
+    # Identite stable : une personne qui revient sous un nouveau numero de piste ByteTrack (apres une
+    # occlusion) est reconnue par la couleur de ses vetements et garde son ID.
+    identity_memory: 60.0           # s : on se souvient d'une personne disparue pendant 60 s
+    identity_provisional_time: 1.0  # s : une piste plus jeune peut encore etre reconnue comme une personne connue
 
 target_selector_node:
   ros__parameters:

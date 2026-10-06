@@ -15,6 +15,7 @@ class FollowerParams:
     max_angular: float = 1.0         # rad/s (SEC-02)
     min_distance: float = 0.5        # m, arret en dessous (SEC-04)
     max_reverse: float = 0.0         # m/s, recul autorise si la cible est trop proche (0 = jamais)
+    search_angular: float = 0.0      # rad/s, rotation sur place pour chercher la cible perdue (0 = attendre, EF-07)
 
 
 def clamp(value, low, high):
@@ -37,6 +38,18 @@ def compute_command(bearing, distance, p):
         v = 0.0 if abs(error) < p.distance_deadband else p.k_linear * error
         v = clamp(v, -p.max_reverse, p.max_linear)
     return v, w
+
+
+def search_command(bearing, p):
+    """Cible perdue depuis plus de lost_timeout (SEARCHING, EF-07) : rotation sur place (v = 0) a vitesse
+    constante search_angular, du cote ou elle a disparu (signe de son dernier angle connu).
+
+    Perdue depuis peu (LOST), le robot reste arrete : la cible est souvent juste cachee par quelqu'un,
+    et son dernier angle n'est plus mis a jour pendant que le robot tourne.
+    """
+    if p.search_angular <= 0.0:
+        return 0.0, 0.0
+    return 0.0, math.copysign(p.search_angular, bearing)
 
 
 def rate_limit(previous, target, max_rate, dt):
