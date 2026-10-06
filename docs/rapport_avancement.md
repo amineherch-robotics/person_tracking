@@ -6,7 +6,7 @@ Pour comprendre comment fonctionne ce qui a été construit : **annexes pédagog
 
 Sections : 1. Présentation et plan · 2. État d'avancement · 3. Journal · 4. Problèmes et solutions · 5. Points ouverts · 6. Prochaines étapes · Annexes A à E.
 
-**Dernière mise à jour :** 6 octobre 2026 · **Phase en cours :** Phase 1, simulation terminée et outils du test réel prêts ; test réel à faire
+**Dernière mise à jour :** 6 octobre 2026 · **Phase en cours :** détection (YOLO) et suivi multi-personnes (Ultralytics) fonctionnent en simulation ; test réel de la Phase 1 en attente
 
 ## 1. Présentation du projet et plan suivi
 
@@ -64,9 +64,11 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | Préparation | Workspace TurtleBot3 réparé (ancienne compilation Humble), simulation et LiDAR vérifiés | Non prévu : il a fallu d'abord remettre l'environnement en état |
 | 0 · Fondations | ✅ Cahier des charges corrigé, 5 packages, messages, robot avec webcam, monde avec personne, lancement `mode:=sim/real` | Le modèle `burger_cam` existait déjà chez ROBOTIS : il a été adapté (caméra standard au lieu du fisheye) au lieu d'être créé |
 | 1 · Pipeline minimal | ⏳ Simulation validée : détection, sélection, contrôleur P, watchdog, arrêt d'urgence, 16 tests ; balle pilotable au joystick | Balle de tennis au lieu d'une balle rouge (plus facile à trouver pour le test réel) ; joystick ajouté pour tester une cible mobile ; **test réel et rosbags pas encore faits** |
-| 2 à 5 | ⬜ | — |
+| 2 · Détection YOLO | ✅ en simulation | Le projet est réorganisé en **deux parties** : (1) détection des personnes avec YOLO, (2) suivi multi-objets avec le tracker intégré d'Ultralytics. La distance vient du LiDAR, la personne étant coupée par le haut de l'image |
+| 3 · Tracking | ⏳ | **Écart au cahier des charges** : le suivi utilise ByteTrack (Ultralytics) au lieu d'un SORT codé soi-même. SORT reste possible plus tard, pour comparer |
+| 4 et 5 | ⬜ | — |
 
-**Décisions reportées** : hauteur et inclinaison de la caméra (avant la Phase 2), autoriser un léger recul (voir section 5).
+**Décisions en attente** : hauteur et inclinaison de la caméra (devenue bloquante, voir section 5), autoriser un léger recul.
 
 ## 2. État d'avancement
 
@@ -74,8 +76,8 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 |---|---|---|---|
 | 0 · Fondations | S1 | Cahier des charges, architecture, simulation Gazebo + caméra | ✅ Terminée |
 | 1 · Pipeline minimal | S2 | Détection couleur, contrôleur P, watchdog, premier test réel, rosbags | ⏳ Simulation validée ; outils du réel prêts (webcam, réglage HSV, rosbags) ; test réel à faire |
-| 2 · Détection YOLO | S3 | YOLO dans ROS2, mesure des FPS en sim et sur rosbags | ⬜ |
-| 3 · Tracking from scratch | S4–S6 | SORT (Kalman + hongrois), sélection de cible, baseline `model.track()` | ⬜ |
+| 2 · Détection YOLO | S3 | YOLO dans ROS2, mesure des FPS en sim et sur rosbags | ✅ En simulation (YOLO26n, 11 images/s avec le suivi) |
+| 3 · Tracking | S4–S6 | Suivi multi-objets, sélection et verrouillage de la cible | ⏳ Suivi Ultralytics (ByteTrack) + verrouillage d'un ID en simulation ; SORT codé soi-même non fait |
 | 4 · Réel et robustesse | S7–S8 | Commande avancée, calibration, occlusions, ré-ID, fusion LiDAR | ⬜ |
 | 5 · Évaluation et livrables | S9 | Tableau sim / réel / baseline, README, vidéo, post LinkedIn | ⬜ |
 
@@ -84,14 +86,14 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | ID | Exigence | Priorité | État |
 |---|---|---|---|
 | EF-01 | Flux webcam publié dans ROS2 | Must | 🟡 En simulation (`/camera/image_raw`) ; réel à faire |
-| EF-02 | Détection des personnes (bbox + score) | Must | ⬜ |
-| EF-03 | Identifiant stable par personne | Must | ⬜ |
-| EF-04 | Track maintenu pendant une occlusion ≤ 2 s | Must | ⬜ |
-| EF-05 | Sélection et verrouillage d'une cible | Must | ⬜ |
+| EF-02 | Détection des personnes (bbox + score) | Must | ✅ YOLO26n, en simulation |
+| EF-03 | Identifiant stable par personne | Must | 🟡 ByteTrack : IDs stables tant que la personne est bien visible ; IDs perdus de près (jambes seules) |
+| EF-04 | Track maintenu pendant une occlusion ≤ 2 s | Must | 🟡 ByteTrack garde une piste 30 images (≈ 3 s) ; à mesurer sur occlusion scriptée |
+| EF-05 | Sélection et verrouillage d'une cible | Must | ✅ Piste la plus proche du centre, gardée par ID, ré-acquisition après 2 s |
 | EF-06 | Orientation vers la cible, distance de 1 m | Must | 🟡 Validé en sim sur une balle de tennis (1,00 m) ; personne et réel à faire |
 | EF-07 | Mode recherche si cible perdue > 2 s | Should | 🟡 État SEARCHING publié après 2 s ; rotation pas encore implémentée |
 | EF-08 | Ré-identification après occlusion longue | Should | ⬜ |
-| EF-09 | Distance par fusion caméra-LiDAR | Should | ⬜ |
+| EF-09 | Distance par fusion caméra-LiDAR | Should | 🟡 Rayons du LiDAR dans la direction de la personne ; erreur ≈ +11 cm |
 | EF-10 | Image de debug (bbox, IDs, cible) | Must | 🟡 `/detector/debug_image` (bbox + score) ; IDs et cible en Phase 3 |
 | EF-11 | Même code en sim et en réel (`mode:=sim/real`) | Must | 🟡 Chaîne complète lancée par `mode:=sim/real` ; réel pas encore testé |
 | EF-12 | Backend de détection couleur (HSV) | Could | ✅ `detector_node backend:=color` |
@@ -108,6 +110,50 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 Légende : ✅ fait · 🟡 partiel · ⏳ en cours · ⬜ pas commencé
 
 ## 3. Journal
+
+### 6 octobre 2026 — Partie 2 : suivi multi-personnes avec Ultralytics
+
+**Organisation.** Le projet est découpé en deux parties : (1) **détection** des personnes avec YOLO, image par image ; (2) **suivi multi-objets** : chaque personne garde un identifiant (ID) d'une image à l'autre, et le robot suit un ID précis.
+
+**Ce qui a été fait**
+
+- **Détection (partie 1)** : backend `yolo` dans `detector_node`, modèle YOLO26n (5 Mo, téléchargé au premier lancement), sur le processeur. File d'attente d'images de taille 1 : le détecteur traite toujours l'image la plus récente.
+- **Distance par LiDAR** (EF-09) : la personne est coupée par le haut de l'image, donc la hauteur de sa bbox ne donne pas sa distance. On prend les rayons du LiDAR dans sa direction (un percentile bas, pour garder les jambes et ignorer le mur derrière).
+- **Suivi (partie 2)** : `model.track()` d'Ultralytics avec **ByteTrack**. Les IDs sont publiés sur `/tracks`. `target_selector_node` **verrouille** la personne la plus proche du centre de l'image et suit son ID, même si quelqu'un d'autre passe plus au centre ; si l'ID disparaît plus de 2 s, il choisit une nouvelle cible.
+- **Monde** : 3 personnes, dont les trajectoires se croisent ; marche ralentie à environ 0,2 m/s.
+- **Choix de la cible au lancement** : `target:=person` (YOLO + LiDAR) ou `target:=ball` (couleur).
+- 27 tests (dont 6 pour le verrouillage).
+
+**Installation de YOLO sans casser ROS.** PyTorch (version CPU) et Ultralytics sont installés dans `~/.local`. ROS 2 est compilé avec NumPy 1.26 et l'OpenCV du système : NumPy est verrouillé à 1.26.4, Ultralytics installé sans ses dépendances automatiques (sinon il remplace OpenCV), et le module `lap` du tracker installé à la main (sinon Ultralytics l'installe tout seul au premier suivi). PyTorch avait aussi amené un `setuptools` plus récent, qui perturbait la compilation des packages ROS : retiré.
+
+**Le problème de vitesse, et sa solution**
+
+| Configuration | Temps par image | Images/s | Vitesse de Gazebo |
+|---|---|---|---|
+| YOLO seul, sans simulation | 46–66 ms | 15–20 | — |
+| Premier essai dans la chaîne | 232–507 ms | 2,6 | 0,24× le temps réel |
+| Threads limités (corrigé) | **126 ms** | **11** | **0,8×** |
+
+Cause : trop de threads pour 8 cœurs. PyTorch, OpenCV et OpenBLAS (calculs NumPy du tracker) lançaient chacun un thread par cœur, et Ultralytics **remettait PyTorch à 7 threads** à sa première prédiction, en écrasant notre réglage. Le détecteur prenait 490 % du processeur et Gazebo ralentissait. Correction : variables `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1` au lancement, `cv2.setNumThreads(1)`, et limite de PyTorch (3 threads) réimposée à chaque image. Un ancien `detector_node` du test de rejeu tournait aussi encore en arrière-plan : arrêté.
+
+**Résultats en simulation** (60 s, 3 personnes, vérité terrain calculée à partir des trajectoires scriptées)
+
+| Mesure | Résultat | Cible du CdC | |
+|---|---|---|---|
+| Détection + suivi | 11 images/s (126 ms) | ≥ 15 FPS | ⚠️ |
+| Latence image → commande | médiane 126 ms | < 150 ms | ✅ |
+| Arrêts du watchdog | 0 | — | ✅ |
+| Personne suivie | toujours la même (personne 1) | — | ✅ |
+| Changements d'ID de la cible | 1 (perdue > 2 s puis retrouvée sous un nouvel ID) | 0 | ⚠️ |
+| IDs créés pour 3 personnes | 10 en 60 s | 3 idéalement | ⚠️ |
+| Distance réelle de suivi | médiane 0,85 m | 1,0 ± 0,2 m | ✅ (limite) |
+| Erreur de la distance LiDAR | +11 cm | — | 🟡 |
+
+**Ce que ces résultats montrent**
+
+- **La caméra est trop basse.** De près, elle ne voit que les jambes : YOLO détecte par intermittence, chaque trou fait perdre la piste, et ByteTrack crée un nouvel ID. C'est l'origine des 10 IDs et du changement d'ID de la cible. La décision sur la caméra (point ouvert n° 1) devient bloquante.
+- **11 images/s au lieu de 15.** Pistes : utiliser la carte NVIDIA (installer son pilote), ou exporter le modèle au format OpenVINO (optimisé pour les processeurs Intel).
+- **Distance LiDAR surestimée d'environ 11 cm** : le LiDAR mesure jusqu'aux jambes, la vérité terrain est approximée par le centre de la personne moins 15 cm.
 
 ### 6 octobre 2026 — Phase 1 : préparation du test réel
 
@@ -330,11 +376,14 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 | Pas de manette pour déplacer la balle | `/dev/input/js0` est l'accéléromètre du portable | Joystick à l'écran (`ball_joystick`, Tkinter) |
 | « Vraies » distances incohérentes pendant le test | Positions balle et robot lues à 2,5 s d'écart pendant qu'ils bougent | Lire les deux positions dans le même message Gazebo |
 | Deux dépôts ROBOTIS sur la branche `humble` | Clonage initial | `git checkout jazzy` + recompilation |
+| YOLO à 2,6 images/s, Gazebo à 0,24× | Trop de threads ; Ultralytics remet PyTorch à 7 threads | Variables OMP/OPENBLAS à 1, limite réimposée à chaque image → 11 images/s |
+| `setuptools` 78 dans `~/.local` après PyTorch | Dépendance de PyTorch | Désinstallé ; la version du système suffit |
+| Distance de la personne fausse | Personne coupée par le haut de l'image | Distance mesurée par le LiDAR |
 | `/clock` à 1 000 Hz dans les rosbags | Enregistrée avec le reste | Retirée ; `ros2 bag play --clock` la régénère |
 
 ## 5. Points ouverts et décisions à prendre
 
-1. **Hauteur et inclinaison de la caméra** (reporté ; à décider avant la Phase 2, sans impact sur la balle au sol). La caméra est à 13 cm du sol et pointe à l'horizontale. À 1 m de la personne, on ne verrait que ses jambes. Trois options :
+1. **Hauteur et inclinaison de la caméra** (**bloquant** pour le suivi de personne : de près, seules les jambes sont visibles, d'où des détections intermittentes et des IDs perdus). La caméra est à 13 cm du sol et pointe à l'horizontale. À 1 m de la personne, on ne verrait que ses jambes. Trois options :
    - incliner la caméra vers le haut d'environ 25° ;
    - monter la webcam sur un mât ;
    - suivre la personne à 1,5–2 m au lieu de 1 m.
@@ -349,6 +398,8 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 7. **Réglages pour le réel** : seuils HSV à régler sur des images réelles (une balle de tennis usée est plus terne), horloges robot/laptop à synchroniser pour que la latence mesurée soit juste.
 8. **Panneaux de la fenêtre Gazebo** : la caméra s'affiche bien (vérifié sur la vidéo). Le panneau LiDAR ne choisit pas `/scan` tout seul : à sélectionner à la main (↻ puis `/scan`).
 9. ~~Branches git du workspace~~ : réglé le 6 octobre, les quatre dépôts ROBOTIS sont sur `jazzy`.
+11. **Écart au cahier des charges** : suivi par ByteTrack (Ultralytics) au lieu d'un SORT codé soi-même (objectif d'apprentissage du CdC). À rediscuter : coder SORT pour le comparer à ByteTrack ?
+12. **11 images/s au lieu de 15** : pilote NVIDIA ou export OpenVINO.
 10. **Détecteur plus lent que la caméra** (≈ 17 contre 28 images/s en simulation sans fenêtre). À mesurer avant YOLO (Phase 2), et à comparer avec la cible du cahier des charges (≥ 15 FPS en simulation).
 
 ## 6. Prochaines étapes (fin de la Phase 1)
@@ -716,6 +767,11 @@ Dans un cas aussi net, on pourrait associer « à la main ». L'algorithme devie
 | **ID switch** | Erreur où le tracker échange les identifiants de deux personnes. |
 | **Occlusion** | Objet temporairement caché par un autre. |
 | **Ré-identification** | Reconnaître une personne après une longue disparition, grâce à son apparence. |
+| **ByteTrack** | Tracker utilisé par Ultralytics : comme SORT (Kalman + association), mais il utilise aussi les détections peu sûres en seconde passe, ce qui rattrape les personnes à moitié cachées. |
+| **`model.track()`** | Fonction d'Ultralytics qui fait détection + suivi en un appel ; `persist=True` garde les pistes d'une image à l'autre. |
+| **track_buffer** | Nombre d'images pendant lesquelles ByteTrack garde une piste sans détection (30 ≈ 3 s à 10 images/s). |
+| **Thread / sur-souscription** | Un thread est un fil d'exécution sur un cœur du processeur. Lancer plus de threads que de cœurs (sur-souscription) fait attendre tout le monde, et tout ralentit. |
+| **CPU / GPU** | Processeur principal / carte graphique. Les réseaux de neurones vont beaucoup plus vite sur GPU, mais il faut son pilote (ici absent : YOLO tourne sur CPU). |
 | **Fusion caméra-LiDAR** | Combiner l'angle donné par la caméra et la distance précise donnée par le LiDAR. |
 
 ## Annexe D — Les nodes et les topics du projet
@@ -808,6 +864,7 @@ Gazebo lui-même (`gz sim`) n'est **pas** un node ROS : il a son propre système
 |---|---|---|---|
 | `/detections`<br>*`vision_msgs/Detection2DArray`* | `detector_node` → `target_selector_node` | Liste des objets trouvés dans l'image : bbox (centre, taille en pixels), classe (`tennis_ball`), score. Liste vide si rien n'est vu | une par image |
 | `/detector/debug_image`<br>*`sensor_msgs/Image`* | `detector_node` → `rqt_image_view`, RViz | L'image avec la bbox dessinée. Calculée seulement si quelqu'un écoute | une par image |
+| `/tracks`<br>*`tb_interfaces/TrackArray`* | `detector_node` (mode suivi) → `target_selector_node` | Les personnes suivies : ID, bbox, score, vitesse dans l'image, âge de la piste | une par image traitée (≈ 11 Hz) |
 | `/target`<br>*`tb_interfaces/TargetState`* | `target_selector_node` → `follower_controller` | La cible : état (IDLE, LOCKED, LOST, SEARCHING), angle (rad), distance (m), bbox, temps depuis la dernière vue | une par image |
 | `/cmd_vel`<br>*`geometry_msgs/TwistStamped`* | `follower_controller` → `ros_gz_bridge` → roues | La commande : vitesse d'avance `v` (m/s) et de rotation `ω` (rad/s), avec l'heure | 20 Hz |
 | `/ball/cmd_vel`<br>*`geometry_msgs/Twist`* | `ball_joystick` → `ros_gz_bridge` → plugin `VelocityControl` de la balle | Vitesse de la balle : `linear.x` (vers +x), `linear.y` (vers +y), en m/s. Simulation uniquement | 20 Hz |
