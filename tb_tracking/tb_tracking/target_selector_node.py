@@ -1,6 +1,8 @@
-"""target_selector_node : /detections -> /target (tb_interfaces/TargetState).
+"""target_selector_node : /detections ou /tracks -> /target (tb_interfaces/TargetState).
 
-Phase 1-2 : pas encore de tracker, la cible est la detection de meilleur score dans chaque image.
+input: detections (balle) : la cible est la detection de meilleur score dans chaque image.
+input: tracks (personnes suivies) : on verrouille un identifiant de piste et on le garde (EF-05),
+avec re-acquisition apres lost_timeout (voir target_lock.py).
 Distance : 'bbox' (hauteur connue de l'objet, ex. la balle) ou 'lidar' (rayons du /scan dans la direction
 de la cible, EF-09 : pour une personne, coupee par le haut de l'image, la hauteur de la bbox est inutilisable).
 Phase 3 : l'entree deviendra /tracks et la cible sera verrouillee sur un id (EF-05).
@@ -15,8 +17,9 @@ from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, LaserScan
 from vision_msgs.msg import Detection2DArray
 
-from tb_interfaces.msg import TargetState
+from tb_interfaces.msg import TargetState, TrackArray
 from tb_tracking.target_geometry import bearing, distance_from_height, distance_from_scan, intrinsics_from_hfov
+from tb_tracking.target_lock import LOCKED, TargetLock, TrackObs
 
 
 class TargetSelectorNode(Node):
@@ -45,13 +48,21 @@ class TargetSelectorNode(Node):
         self.last_target = None
 
         self.pub = self.create_publisher(TargetState, 'target', 10)
-        self.create_subscription(Detection2DArray, 'detections', self.on_detections, 10)
+        source = self.declare_parameter('input', 'detections').value
+        if source == 'tracks':
+            self.lock = TargetLock(self.lost_timeout)
+            self.locked_id = None
+            self.create_subscription(TrackArray, 'tracks', self.on_tracks, 10)
+        elif source == 'detections':
+            self.create_subscription(Detection2DArray, 'detections', self.on_detections, 10)
+        else:
+            raise ValueError(f"input inconnu : '{source}' (detections ou tracks)")
         self.create_subscription(CameraInfo, camera_info_topic, self.on_camera_info, qos_profile_sensor_data)
         if self.distance_method == 'lidar':
             self.create_subscription(LaserScan, scan_topic, self.on_scan, qos_profile_sensor_data)
         elif self.distance_method != 'bbox':
             raise ValueError(f"distance_method inconnu : '{self.distance_method}' (bbox ou lidar)")
-        self.get_logger().info(f'Distance a la cible : {self.distance_method}')
+        self.get_logger().info(f'Entree : {source}, distance a la cible : {self.distance_method}')
 
     def on_scan(self, msg):
         self.scan = msg
@@ -70,6 +81,43 @@ class TargetSelectorNode(Node):
         half_width = max(self.sector_min, self.sector_fraction * 2.0 * math.atan2(bbox_width / 2.0, fx))
         return distance_from_scan(scan.ranges, scan.angle_min, scan.angle_increment, target_bearing, half_width,
                                   scan.range_min, scan.range_max)
+
+    def measure(self, target, bbox, fx, fy, cx, stamp):
+        """Remplit angle et distance de la cible a partir de sa bbox."""
+        target.bbox = bbox
+        target.bearing = bearing(bbox.center.position.x, cx, fx)
+        if self.distance_method == 'lidar':
+            target.distance = self.lidar_distance(target.bearing, bbox.size_x, fx, stamp)
+            target.distance_source = TargetState.DISTANCE_LIDAR
+        else:
+            target.distance = distance_from_height(bbox.size_y, fy, self.object_height)
+            target.distance_source = TargetState.DISTANCE_BBOX
+
+    def on_tracks(self, msg):
+        fx, fy, cx, _ = self.intrinsics
+        stamp = Time.from_msg(msg.header.stamp)
+        observations = [TrackObs(tr.id, tr.bbox.center.position.x, tr.bbox.center.position.y,
+                                 tr.bbox.size_x, tr.bbox.size_y) for tr in msg.tracks]
+        state, obs, elapsed = self.lock.update(observations, stamp.nanoseconds * 1e-9, cx)
+
+        target = TargetState()
+        target.header = msg.header
+        target.state = state
+        target.distance = float('nan')
+        target.time_since_seen = float(elapsed)
+        if obs is not None:
+            target.target_id = obs.id
+            track = next((tr for tr in msg.tracks if tr.id == obs.id), None)
+            if state == LOCKED and track is not None:
+                self.measure(target, track.bbox, fx, fy, cx, stamp)
+            else:
+                target.bearing = bearing(obs.cx, cx, fx)  # derniere direction connue
+        if state == LOCKED and obs.id != self.locked_id:
+            self.get_logger().info(f'Cible verrouillee : ID {obs.id} (verrouillage n {self.lock.lock_count})')
+            self.locked_id = obs.id
+        if math.isnan(target.distance):
+            target.distance_source = TargetState.DISTANCE_NONE
+        self.pub.publish(target)
 
     def on_detections(self, msg):
         fx, fy, cx, _ = self.intrinsics

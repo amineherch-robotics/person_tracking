@@ -1,6 +1,8 @@
-"""detector_node : image -> /detections (vision_msgs/Detection2DArray).
+"""detector_node : image -> /detections (vision_msgs/Detection2DArray), et /tracks en mode suivi.
 
 Backends : 'color' (HSV, Phase 1) et 'yolo' (personnes, Phase 2).
+Avec backend yolo et tracker: bytetrack.yaml, Ultralytics fait detection + suivi multi-objets en un appel :
+chaque personne garde un identifiant stable, publie dans Detection2D.id et sur /tracks (TrackArray).
 Le header de l'image d'origine est recopie tel quel (ENF-01).
 """
 
@@ -12,9 +14,11 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
+from tb_interfaces.msg import Track, TrackArray
 from tb_perception.color_detector import ColorDetector
 
 # File d'attente de 1 image : si le detecteur est plus lent que la camera, il traite toujours
@@ -54,6 +58,8 @@ class DetectorNode(Node):
                 device=self.declare_parameter('device', 'cpu').value,
                 max_detections=self.declare_parameter('max_detections', 10).value,
                 num_threads=self.declare_parameter('num_threads', 3).value,
+                tracker=self.declare_parameter('tracker', '').value,
+                track_conf=self.declare_parameter('track_conf', 0.1).value,
             )
         else:
             raise ValueError(f"backend inconnu : '{backend}' (backends disponibles : color, yolo)")
@@ -63,6 +69,11 @@ class DetectorNode(Node):
         self.bridge = CvBridge()
         self.pub = self.create_publisher(Detection2DArray, 'detections', 10)
         self.debug_pub = self.create_publisher(Image, 'detector/debug_image', 1)
+        self.tracking = backend == 'yolo' and bool(self.detector.tracker)
+        if self.tracking:
+            self.tracks_pub = self.create_publisher(TrackArray, 'tracks', 10)
+            self.track_memory = {}  # id -> (cx, cy, temps, age) pour la vitesse et l'age des pistes
+            self.get_logger().info(f'Suivi multi-objets : {self.detector.tracker}')
 
         if transport == 'compressed':
             self.create_subscription(
@@ -94,23 +105,61 @@ class DetectorNode(Node):
             d.bbox.center.position.y = det.cy
             d.bbox.size_x = det.w
             d.bbox.size_y = det.h
+            if det.track_id >= 0:
+                d.id = str(det.track_id)
             hyp = ObjectHypothesisWithPose()
             hyp.hypothesis.class_id = self.class_id
             hyp.hypothesis.score = det.score
             d.results.append(hyp)
             out.detections.append(d)
         self.pub.publish(out)
+        if self.tracking:
+            self.publish_tracks(detections, header)
 
         if self.publish_debug and self.debug_pub.get_subscription_count() > 0:
             for det in detections:
                 p1 = (int(det.cx - det.w / 2), int(det.cy - det.h / 2))
                 p2 = (int(det.cx + det.w / 2), int(det.cy + det.h / 2))
                 cv2.rectangle(image, p1, p2, (0, 255, 0), 2)
-                cv2.putText(image, f'{self.class_id} {det.score:.2f}', (p1[0], max(p1[1] - 6, 12)),
+                label = f'ID {det.track_id} ' if det.track_id >= 0 else ''
+                cv2.putText(image, f'{label}{self.class_id} {det.score:.2f}', (p1[0], max(p1[1] - 6, 12)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             debug = self.bridge.cv2_to_imgmsg(image, 'bgr8')
             debug.header = header
             self.debug_pub.publish(debug)
+
+    def publish_tracks(self, detections, header):
+        now = Time.from_msg(header.stamp).nanoseconds * 1e-9
+        msg = TrackArray()
+        msg.header = header
+        seen = set()
+        for det in detections:
+            if det.track_id < 0:
+                continue
+            seen.add(det.track_id)
+            track = Track()
+            track.id = det.track_id
+            track.bbox.center.position.x = det.cx
+            track.bbox.center.position.y = det.cy
+            track.bbox.size_x = det.w
+            track.bbox.size_y = det.h
+            track.score = det.score
+            previous = self.track_memory.get(det.track_id)
+            age = 1
+            if previous is not None:
+                px, py, pt, page = previous
+                age = page + 1
+                if now > pt:
+                    track.vx = float((det.cx - px) / (now - pt))
+                    track.vy = float((det.cy - py) / (now - pt))
+            self.track_memory[det.track_id] = (det.cx, det.cy, now, age)
+            track.age = age
+            track.frames_since_update = 0
+            track.confirmed = True  # Ultralytics ne publie que les pistes confirmees
+            msg.tracks.append(track)
+        # Oublier les pistes absentes depuis plus de 10 s
+        self.track_memory = {k: v for k, v in self.track_memory.items() if k in seen or now - v[2] < 10.0}
+        self.tracks_pub.publish(msg)
 
     def report_speed(self):
         if not self.inference_ms:

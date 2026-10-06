@@ -14,6 +14,7 @@ class Detection:
     w: float       # taille de la bbox, pixels
     h: float
     score: float   # 0..1
+    track_id: int = -1  # identifiant de suivi (mode tracking YOLO), -1 sinon
 
 
 class ColorDetector:

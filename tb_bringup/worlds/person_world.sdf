@@ -135,5 +135,55 @@
       </script>
     </actor>
 
+    <!-- Personnes 2 et 3 : croisent la trajectoire de la personne 1, pour tester le suivi multi-objets
+         (memes IDs malgre les croisements et les occlusions). Meme modele 3D que la personne 1. -->
+    <actor name="person_2">
+      <skin>
+        <filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename>
+        <scale>1.0</scale>
+      </skin>
+      <animation name="walk">
+        <filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      <script>
+        <loop>true</loop>
+        <delay_start>0.0</delay_start>
+        <auto_start>true</auto_start>
+        <!-- Aller-retour sur une ligne y = 0, de x = 2.0 a 4.5 (~0.2 m/s) : passe devant puis derriere la personne 1 -->
+        <trajectory id="1" type="walk">
+          <waypoint><time>0</time><pose>4.5 0.0 1.0 0 0 3.1416</pose></waypoint>
+          <waypoint><time>12.5</time><pose>2.0 0.0 1.0 0 0 3.1416</pose></waypoint>
+          <waypoint><time>15</time><pose>2.0 0.0 1.0 0 0 0</pose></waypoint>
+          <waypoint><time>27.5</time><pose>4.5 0.0 1.0 0 0 0</pose></waypoint>
+          <waypoint><time>30</time><pose>4.5 0.0 1.0 0 0 3.1416</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
+    <actor name="person_3">
+      <skin>
+        <filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename>
+        <scale>1.0</scale>
+      </skin>
+      <animation name="walk">
+        <filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      <script>
+        <loop>true</loop>
+        <delay_start>0.0</delay_start>
+        <auto_start>true</auto_start>
+        <!-- Aller-retour sur une ligne x = 5.0, de y = -2.5 a 2.5 (~0.25 m/s), au fond de la piece -->
+        <trajectory id="2" type="walk">
+          <waypoint><time>0</time><pose>5.0 2.5 1.0 0 0 -1.5708</pose></waypoint>
+          <waypoint><time>20</time><pose>5.0 -2.5 1.0 0 0 -1.5708</pose></waypoint>
+          <waypoint><time>22.5</time><pose>5.0 -2.5 1.0 0 0 1.5708</pose></waypoint>
+          <waypoint><time>42.5</time><pose>5.0 2.5 1.0 0 0 1.5708</pose></waypoint>
+          <waypoint><time>45</time><pose>5.0 2.5 1.0 0 0 -1.5708</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+
   </world>
 </sdf>

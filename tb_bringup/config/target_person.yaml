@@ -1,4 +1,5 @@
-# Cible = personne (Phase 2). Charge apres sim.yaml / real.yaml par : bringup.launch.py target:=person
+# Cible = personne. Charge apres sim.yaml / real.yaml par : bringup.launch.py target:=person
+# Partie 1 : detection YOLO. Partie 2 : suivi multi-objets Ultralytics (tracker) + verrouillage d'un ID.
 detector_node:
   ros__parameters:
     backend: yolo
@@ -11,13 +12,17 @@ detector_node:
     device: cpu               # pas de pilote NVIDIA sur le laptop ; 'cuda:0' sinon
     num_threads: 3            # CPU : 3 threads = 95 ms/image stable avec Gazebo (4 : instable, jusqu'a 300 ms)
     max_detections: 10
+    # Suivi multi-objets (partie 2) : '' pour la detection seule, bytetrack.yaml ou botsort.yaml
+    tracker: bytetrack.yaml
+    track_conf: 0.1           # ByteTrack utilise aussi les detections peu sures (2e passe d'association)
 
 target_selector_node:
   ros__parameters:
+    input: tracks             # verrouille un ID de piste (EF-05) ; 'detections' : meilleure detection
     # La personne est coupee par le haut de l'image : la hauteur de la bbox ne donne pas la distance.
     # On prend les rayons du LiDAR dans la direction de la personne (fusion camera-LiDAR, EF-09).
     distance_method: lidar
     lidar_sector_fraction: 0.25   # centre de la bbox (le tronc, les jambes)
     lidar_sector_min_deg: 1.5
     scan_max_age: 0.5             # s
-    lost_timeout: 2.0
+    lost_timeout: 2.0         # s : au-dela, le verrou est relache et une nouvelle cible est choisie

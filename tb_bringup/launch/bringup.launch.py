@@ -48,7 +48,10 @@ def generate_launch_description():
 
     pipeline_nodes = [
         Node(package='tb_perception', executable='detector_node',
-             parameters=[params_file, target_file], output='screen', condition=IfCondition(pipeline)),
+             parameters=[params_file, target_file], output='screen', condition=IfCondition(pipeline),
+             # Bibliotheques de calcul limitees a 1 thread chacune (sinon une par coeur : 490 % CPU mesures,
+             # Gazebo ralenti a 0,24x le temps reel) ; PyTorch est regle par le parametre num_threads.
+             additional_env={'OMP_NUM_THREADS': '1', 'OPENBLAS_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1'}),
         Node(package='tb_tracking', executable='target_selector_node',
              parameters=[params_file, target_file], output='screen', condition=IfCondition(pipeline)),
         Node(package='tb_control', executable='follower_controller',
