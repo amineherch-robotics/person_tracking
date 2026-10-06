@@ -398,9 +398,9 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 7. **Réglages pour le réel** : seuils HSV à régler sur des images réelles (une balle de tennis usée est plus terne), horloges robot/laptop à synchroniser pour que la latence mesurée soit juste.
 8. **Panneaux de la fenêtre Gazebo** : la caméra s'affiche bien (vérifié sur la vidéo). Le panneau LiDAR ne choisit pas `/scan` tout seul : à sélectionner à la main (↻ puis `/scan`).
 9. ~~Branches git du workspace~~ : réglé le 6 octobre, les quatre dépôts ROBOTIS sont sur `jazzy`.
+10. **Détecteur plus lent que la caméra** (≈ 17 contre 28 images/s en simulation sans fenêtre). À mesurer avant YOLO (Phase 2), et à comparer avec la cible du cahier des charges (≥ 15 FPS en simulation).
 11. **Écart au cahier des charges** : suivi par ByteTrack (Ultralytics) au lieu d'un SORT codé soi-même (objectif d'apprentissage du CdC). À rediscuter : coder SORT pour le comparer à ByteTrack ?
 12. **11 images/s au lieu de 15** : pilote NVIDIA ou export OpenVINO.
-10. **Détecteur plus lent que la caméra** (≈ 17 contre 28 images/s en simulation sans fenêtre). À mesurer avant YOLO (Phase 2), et à comparer avec la cible du cahier des charges (≥ 15 FPS en simulation).
 
 ## 6. Prochaines étapes (fin de la Phase 1)
 
