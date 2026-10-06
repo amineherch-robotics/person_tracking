@@ -21,8 +21,21 @@ def test_speed_saturation_sec02():
     assert v == P.max_linear and w == P.max_angular
 
 
-def test_never_moves_backward():
+def test_never_moves_backward_by_default():
     v, _ = compute_command(0.0, 0.7, P)
+    assert v == 0.0
+
+
+def test_slow_reverse_when_enabled():
+    p = FollowerParams(max_reverse=0.05)
+    v, _ = compute_command(0.0, 0.7, p)  # 30 cm trop pres : 0,5 x -0,3 = -0,15, limite a -0,05
+    assert v == -0.05
+    v, _ = compute_command(0.0, 0.97, p)  # dans la zone morte
+    assert v == 0.0
+
+
+def test_reverse_never_overrides_min_distance_sec04():
+    v, _ = compute_command(0.0, 0.45, FollowerParams(max_reverse=0.05))
     assert v == 0.0
 
 

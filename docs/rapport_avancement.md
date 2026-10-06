@@ -6,7 +6,7 @@ Pour comprendre comment fonctionne ce qui a été construit : **annexes pédagog
 
 Sections : 1. Présentation et plan · 2. État d'avancement · 3. Journal · 4. Problèmes et solutions · 5. Points ouverts · 6. Prochaines étapes · Annexes A à E.
 
-**Dernière mise à jour :** 5 octobre 2026 · **Phase en cours :** Phase 1, partie simulation terminée, test réel à faire
+**Dernière mise à jour :** 6 octobre 2026 · **Phase en cours :** Phase 1, simulation terminée et outils du test réel prêts ; test réel à faire
 
 ## 1. Présentation du projet et plan suivi
 
@@ -73,7 +73,7 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | Phase | Semaines | Contenu | État |
 |---|---|---|---|
 | 0 · Fondations | S1 | Cahier des charges, architecture, simulation Gazebo + caméra | ✅ Terminée |
-| 1 · Pipeline minimal | S2 | Détection couleur, contrôleur P, watchdog, premier test réel, rosbags | ⏳ Simulation validée ; test réel et rosbags à faire |
+| 1 · Pipeline minimal | S2 | Détection couleur, contrôleur P, watchdog, premier test réel, rosbags | ⏳ Simulation validée ; outils du réel prêts (webcam, réglage HSV, rosbags) ; test réel à faire |
 | 2 · Détection YOLO | S3 | YOLO dans ROS2, mesure des FPS en sim et sur rosbags | ⬜ |
 | 3 · Tracking from scratch | S4–S6 | SORT (Kalman + hongrois), sélection de cible, baseline `model.track()` | ⬜ |
 | 4 · Réel et robustesse | S7–S8 | Commande avancée, calibration, occlusions, ré-ID, fusion LiDAR | ⬜ |
@@ -97,8 +97,9 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 | EF-12 | Backend de détection couleur (HSV) | Could | ✅ `detector_node backend:=color` |
 | ENF-01 | `header.stamp` d'origine conservé | — | ✅ Recopié jusqu'au contrôleur, latence mesurée |
 | ENF-02 | Paramètres en YAML | — | ✅ Topics, seuils HSV, gains et limites dans `sim.yaml` / `real.yaml` |
-| ENF-03 | Lib indépendante de ROS, testée avec pytest | — | 🟡 16 tests (détecteur, géométrie, loi de commande) ; lib SORT en Phase 3 |
-| ENF-06 | README reproductible en < 15 min | — | 🟡 Lancement Phase 1 documenté |
+| ENF-03 | Lib indépendante de ROS, testée avec pytest | — | 🟡 18 tests (détecteur, géométrie, loi de commande) ; lib SORT en Phase 3 |
+| ENF-05 | Séquences enregistrées en rosbag et rejouables | — | 🟡 `record:=true` et rejeu validés en simulation ; rosbags réels à faire |
+| ENF-06 | README reproductible en < 15 min | — | 🟡 Simulation, rosbags et robot réel documentés |
 | SEC-01 | Watchdog | — | ✅ Arrêt en 275 ms après coupure de la caméra |
 | SEC-02 à 04 | Saturation, accélération, distance minimale | — | ✅ Implémenté et testé (pytest) |
 | SEC-05 | Arrêt d'urgence clavier | — | 🟡 `estop_keyboard` ; priorité de la téléop pas encore gérée |
@@ -107,6 +108,35 @@ Le cahier des charges découpe le projet en 6 phases sur environ 9 semaines. Deu
 Légende : ✅ fait · 🟡 partiel · ⏳ en cours · ⬜ pas commencé
 
 ## 3. Journal
+
+### 6 octobre 2026 — Phase 1 : préparation du test réel
+
+**Objectif.** Que le jour où le robot est disponible, il n'y ait plus qu'à brancher et tester.
+
+**Ce qui a été fait**
+
+- **Branches `jazzy` partout.** `DynamixelSDK` et `turtlebot3` étaient sur `humble`. Passage sur `jazzy`, recompilation des 20 packages du workspace. Côté robot, `turtlebot3_node` attend bien `TwistStamped` sur `/cmd_vel`, comme notre contrôleur.
+- **Recul en option.** Nouveau paramètre `max_reverse` du contrôleur, **désactivé par défaut** (0,0). Avec par exemple 0,05, le robot recule lentement quand la cible est trop proche. L'arrêt sous 0,5 m (SEC-04) reste prioritaire. Trois tests ajoutés (18 au total).
+- **Outil de réglage HSV** (`ros2 run tb_perception hsv_tuner`) : fenêtre avec l'image, le masque et des curseurs ; la touche `s` affiche la ligne à copier dans le YAML. Fonctionne sur l'image brute (simulation) ou compressée (robot).
+- **Enregistrement rosbag** (`record:=true`) : image compressée et toute la chaîne, dans `~/rosbags/<mode>_<date>/` (format mcap).
+- **Webcam du robot** : `config/usb_cam.yaml` (640×480, 15 images/s, MJPEG) et `launch/robot_camera.launch.py`, à lancer sur le Raspberry Pi. Le ROBOTIS `camera.launch.py` vise la caméra Pi (libcamera), pas une webcam USB.
+- **README** : procédure complète pour le robot réel (Pi et laptop), le réglage HSV, l'enregistrement et le rejeu.
+
+**Vérifications en simulation**
+
+| Test | Résultat |
+|---|---|
+| Simulation après passage sur `jazzy` | Suivi de la balle OK |
+| `max_reverse` lu par le contrôleur | 0,0 (désactivé) |
+| Enregistrement de 134 s | 92 Mo (0,7 Mo/s), 10 topics, format mcap |
+| Rejeu : `detector_node` en mode compressé sur le rosbag | 487 images rejouées, balle détectée dans les 487 |
+| `hsv_tuner` sur l'image simulée | Démarre, affiche les seuils à la fermeture |
+
+**Observations**
+
+- Sans fenêtre Gazebo, la caméra publie environ 28 images/s, mais le détecteur n'en traite qu'environ 17 : il saute des images (QoS *best effort*, c'est voulu). **Le détecteur est le maillon le plus lent**, avant même YOLO.
+- `/clock` faisait 122 000 messages dans l'enregistrement (1 000 Hz). Retiré : au rejeu, `ros2 bag play --clock` la régénère, et deux horloges se contrediraient.
+- Le portable a une webcam intégrée (HP Wide Vision HD, `/dev/video0`) : elle permettra de tester le mode réel côté caméra et de régler le HSV sur de vraies images, sans le robot.
 
 ### 5 octobre 2026 — Phase 1 : joystick pour déplacer la balle
 
@@ -299,6 +329,8 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 | Fenêtre Gazebo restée ouverte après l'arrêt | Ligne de commande du client non identifiable | `--gui-config` du package + nettoyage dans `sim.launch.py` |
 | Pas de manette pour déplacer la balle | `/dev/input/js0` est l'accéléromètre du portable | Joystick à l'écran (`ball_joystick`, Tkinter) |
 | « Vraies » distances incohérentes pendant le test | Positions balle et robot lues à 2,5 s d'écart pendant qu'ils bougent | Lire les deux positions dans le même message Gazebo |
+| Deux dépôts ROBOTIS sur la branche `humble` | Clonage initial | `git checkout jazzy` + recompilation |
+| `/clock` à 1 000 Hz dans les rosbags | Enregistrée avec le reste | Retirée ; `ros2 bag play --clock` la régénère |
 
 ## 5. Points ouverts et décisions à prendre
 
@@ -311,19 +343,21 @@ Les détections utilisent le message standard `vision_msgs/Detection2DArray`, ce
 
 2. **Incohérence dans le cahier des charges** : le schéma du planning indique « YOLOv8n » en Phase 2, alors que le texte retient YOLO26n.
 3. **Dépendance manquante** : `ultralytics` n'est pas installé. On n'en a besoin qu'en Phase 2.
-4. **Le robot ne recule jamais** (décision à prendre ; confirmé par le test au joystick : une balle qui avance vers le robot finit par le toucher). C'est plus sûr, car la caméra ne voit pas derrière, mais le robot ne peut pas corriger s'il est trop près. En simulation, le glissement du modèle l'amène à 0,83 m en 30 s, près de la limite de 0,8 m. Sur le vrai robot, le même cas se produira si la personne avance vers lui. Option : autoriser un léger recul (≤ 0,05 m/s) quand la cible est sous la consigne, l'arrêt sous 0,5 m (SEC-04) restant prioritaire.
+4. **Recul** (décision à prendre). Le paramètre `max_reverse` existe maintenant mais vaut 0 (désactivé). Le test au joystick a montré qu'une balle qui avance vers le robot finit par le toucher. Proposition : `max_reverse: 0.05` en simulation et en réel. C'est plus sûr, car la caméra ne voit pas derrière, mais le robot ne peut pas corriger s'il est trop près. En simulation, le glissement du modèle l'amène à 0,83 m en 30 s, près de la limite de 0,8 m. Sur le vrai robot, le même cas se produira si la personne avance vers lui. Option : autoriser un léger recul (≤ 0,05 m/s) quand la cible est sous la consigne, l'arrêt sous 0,5 m (SEC-04) restant prioritaire.
 5. **Cadence de la caméra simulée** : environ 15 images/s reçues au lieu de 30. C'est juste à la limite de la cible de 15 FPS du CdC, avant même d'ajouter YOLO. À surveiller en Phase 2 (rendu GPU, résolution).
 6. **Priorité de la téléop (SEC-05)** : `estop_keyboard` arrête le robot, mais une commande de téléop n'est pas encore prioritaire sur le suiveur (option : `twist_mux`).
 7. **Réglages pour le réel** : seuils HSV à régler sur des images réelles (une balle de tennis usée est plus terne), horloges robot/laptop à synchroniser pour que la latence mesurée soit juste.
 8. **Panneaux de la fenêtre Gazebo** : la caméra s'affiche bien (vérifié sur la vidéo). Le panneau LiDAR ne choisit pas `/scan` tout seul : à sélectionner à la main (↻ puis `/scan`).
-9. **Branches git du workspace** : `DynamixelSDK` et `turtlebot3` sont clonés sur la branche `humble`, les deux autres sur `jazzy`. Ça compile et tourne, mais il faudra passer sur `jazzy` (`git checkout jazzy` puis recompiler) avant le test sur le vrai robot, pour que `turtlebot3_node` corresponde à la version de ROS.
+9. ~~Branches git du workspace~~ : réglé le 6 octobre, les quatre dépôts ROBOTIS sont sur `jazzy`.
+10. **Détecteur plus lent que la caméra** (≈ 17 contre 28 images/s en simulation sans fenêtre). À mesurer avant YOLO (Phase 2), et à comparer avec la cible du cahier des charges (≥ 15 FPS en simulation).
 
 ## 6. Prochaines étapes (fin de la Phase 1)
 
-- Premier test sur le robot réel avec une balle de tennis, dans une zone dégagée et sous surveillance (SEC-06). C'est le critère de passage de la Phase 1.
-- Avant ce test : régler les seuils HSV sur des images réelles de la balle, vérifier le watchdog en coupant le WiFi.
-- Enregistrer les premiers rosbags réels (ENF-05).
-- Optionnel : mode recherche (EF-07), priorité de la téléop (SEC-05), léger recul (point ouvert n° 4).
+- **Sans robot** : tester le mode réel côté caméra avec la webcam du portable (`robot_camera.launch.py`), et s'entraîner à régler le HSV sur une vraie balle de tennis.
+- **Décider** du recul (`max_reverse`).
+- **Avec le robot** : installer `usb_cam` et `chrony` sur le Pi, cloner le dépôt, puis suivre la section « Robot réel » du README.
+- **Premier test réel** avec la balle de tennis, zone dégagée et surveillance (SEC-06), watchdog vérifié en coupant le WiFi. C'est le critère de passage de la Phase 1.
+- Enregistrer les premiers rosbags réels (`record:=true`).
 
 ---
 
@@ -607,7 +641,12 @@ Dans un cas aussi net, on pourrait associer « à la main ». L'algorithme devie
 | **Odométrie** | Position estimée en comptant les tours de roue. Elle dérive avec le temps (glissement). |
 | **RMW / DDS** | Couche réseau qui transporte les messages ROS 2 (ici Fast DDS). |
 | **ROS_DOMAIN_ID** | Numéro de réseau ROS. Robot et laptop doivent avoir le même pour se voir. |
-| **rosbag** | Enregistrement de topics, rejouable plus tard pour tester sans le robot. |
+| **rosbag** | Enregistrement de topics, rejouable plus tard pour tester sans le robot (`ros2 bag record`, `ros2 bag play`). |
+| **mcap** | Format de fichier des rosbags par défaut sous Jazzy. |
+| **image_transport / compressed** | Mécanisme ROS qui publie une image en plusieurs variantes. `/image_raw/compressed` est l'image en JPEG : environ 10 fois plus légère, indispensable en WiFi. |
+| **usb_cam** | Driver ROS des webcams USB : lit la caméra et publie `/image_raw`, `/image_raw/compressed` et `/camera_info`. |
+| **MJPEG** | Format vidéo où chaque image est un JPEG. La plupart des webcams l'utilisent pour envoyer des images en haute résolution. |
+| **chrony** | Service qui synchronise l'horloge d'un ordinateur sur une autre. Nécessaire pour comparer des heures entre robot et laptop. |
 
 ### Simulation (Gazebo)
 
@@ -734,6 +773,9 @@ Pour voir ce graphe en direct : `ros2 run rqt_graph rqt_graph`.
 | `ros_gz_image`<br>*`ros_gz_image` (ROS)*<br>lancé par `sim.launch.py` | Traduit l'image de la caméra Gazebo en image ROS ; crée aussi les variantes compressées | — | `/camera/image_raw` (+ `/compressed`, `/zstd`…) |
 | `robot_state_publisher`<br>*`robot_state_publisher` (ROS)*<br>lancé par `sim.launch.py` | Lit l'URDF et publie la position de chaque pièce du robot (roues, caméra, LiDAR) les unes par rapport aux autres | `/joint_states` | `/tf`, `/tf_static`, `/robot_description` |
 | `ball_joystick`<br>*`tb_bringup`*<br>lancé par `joystick:=true` ou `ros2 run tb_bringup ball_joystick` | Joystick à l'écran (Tkinter) : convertit la position du bouton ou les flèches du clavier en vitesse pour la balle. Simulation uniquement | — | `/ball/cmd_vel` |
+| `hsv_tuner`<br>*`tb_perception`*<br>lancé à la main : `ros2 run tb_perception hsv_tuner` | Outil de réglage : fenêtre avec l'image, le masque et des curseurs HSV | l'image (`raw` ou `compressed`) | — |
+| `webcam` (`usb_cam`)<br>*`usb_cam` (ROS)*<br>lancé sur le robot par `robot_camera.launch.py` | Driver de la webcam USB du robot (mode réel) | — | `/image_raw`, `/image_raw/compressed`, `/camera_info` |
+| `rosbag2_recorder`<br>*`rosbag2` (ROS)*<br>lancé par `record:=true` | Enregistre les topics de la chaîne dans `~/rosbags/` | les 10 topics enregistrés | — |
 | `create`<br>*`ros_gz_sim` (ROS)*<br>lancé par `sim.launch.py` | Fait apparaître le robot dans Gazebo, puis se termine | — | — |
 | `rviz`<br>*`rviz2` (ROS)*<br>lancé par à la main : `rviz2` | Affiche les données des capteurs, le modèle du robot et les repères | ce qu'on lui ajoute (`/scan`, `/odom`…) | `/clicked_point`, `/goal_pose`, `/initialpose` (outils de la barre, non utilisés) |
 
@@ -1095,11 +1137,33 @@ Dans `bringup.launch.py` : un argument `mode` (`sim` ou `real`) qui inclut `sim.
 
 **Vérifier.** Quelqu'un d'autre peut relancer la démo en moins de 15 minutes avec le README (ENF-06).
 
+### Étape 15 — Préparer le test sur le vrai robot
+
+**But.** Tout ce qu'il faut pour que le premier essai réel se passe en sécurité.
+
+**À faire.**
+
+1. **Outil de réglage HSV** (`hsv_tuner.py` dans `tb_perception`) : fenêtre OpenCV avec `cv2.createTrackbar` pour H, S, V min et max, l'image avec les détections et le masque côte à côte.
+2. **Enregistrement** : option `record:=true` dans `bringup.launch.py`, qui lance `ros2 bag record -o ~/rosbags/<mode>_<date>` sur l'image compressée et les topics de la chaîne (pas `/clock`).
+3. **Webcam** : `config/usb_cam.yaml` (640×480, 15 images/s, MJPEG) et `launch/robot_camera.launch.py` (node `usb_cam_node_exe`).
+4. **Sur le Raspberry Pi** : `ros-jazzy-usb-cam`, `chrony`, le dépôt cloné, `colcon build --packages-select tb_bringup`, et le même `ROS_DOMAIN_ID` que le laptop.
+
+**Vérifier.**
+
+- En simulation : `record:=true`, puis `ros2 bag info` (topics et durée), puis rejouer le rosbag dans `detector_node` en mode `compressed` et vérifier que la balle est détectée.
+- Sur le robot : `ros2 topic hz /image_raw/compressed` depuis le laptop (environ 15 Hz), puis réglage HSV sur la vraie balle.
+
+**Piège.**
+
+- `turtlebot3_bringup` exige les variables `TURTLEBOT3_MODEL` et `LDS_MODEL` (LDS-01, 02 ou 03).
+- Le `camera.launch.py` de ROBOTIS est fait pour la caméra Pi, pas pour une webcam USB.
+- Sans synchronisation des horloges (`chrony`), la latence mesurée entre robot et laptop est fausse.
+
 ### Et ensuite
 
 | Phase | Ce qui s'ajoute | Annexe à compléter |
 |---|---|---|
-| 1 (fin) | Test sur le vrai robot avec une vraie balle, rosbags | Seuils HSV réels, montage de la webcam |
+| 1 (fin) | Test sur le vrai robot avec une vraie balle, rosbags réels | Seuils HSV réels, montage de la webcam |
 | 2 | Backend YOLO dans `detector_node` (classe « person ») | Installation d'Ultralytics, mesure des FPS |
 | 3 | Lib SORT (Kalman + hongrois) et `tracker_node` ; `target_selector_node` lit `/tracks` | Tests de la lib, gestion des occlusions |
 | 4 | Contrôleur PI, mode recherche, fusion LiDAR, ré-identification | Calibration caméra-LiDAR |

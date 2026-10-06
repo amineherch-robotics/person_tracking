@@ -1,0 +1,17 @@
+# Webcam USB du robot (usb_cam), lancee sur le Raspberry Pi par launch/robot_camera.launch.py.
+# Publie /image_raw, /image_raw/compressed et /camera_info (topics attendus par config/real.yaml).
+/**:
+  ros__parameters:
+    video_device: "/dev/video0"
+    framerate: 15.0                 # images/s : suffisant (cible du CdC >= 10 FPS) et leger pour le WiFi
+    io_method: "mmap"
+    pixel_format: "mjpeg2rgb"       # la plupart des webcams envoient du MJPEG, decode par usb_cam
+    image_width: 640
+    image_height: 480               # reduire a 320x240 si le Pi ou le WiFi ne suivent pas (risque CdC section 11)
+    frame_id: "camera_rgb_optical_frame"
+    camera_name: "webcam"
+    camera_info_url: ""             # pas encore calibree : target_selector_node utilise camera_hfov
+    autofocus: false
+    autoexposure: true
+    auto_white_balance: true
+    image_raw.jpeg_quality: 80      # compression de /image_raw/compressed (qualite / debit WiFi)

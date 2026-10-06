@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'detector_node = tb_perception.detector_node:main',
+            'hsv_tuner = tb_perception.hsv_tuner:main',
         ],
     },
 )

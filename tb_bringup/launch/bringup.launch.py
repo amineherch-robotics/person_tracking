@@ -1,10 +1,11 @@
 """Point d'entree unique du projet (EF-11) : ros2 launch tb_bringup bringup.launch.py mode:=sim|real"""
 
+from datetime import datetime
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, LogInfo, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EqualsSubstitution, LaunchConfiguration, PathJoinSubstitution, PythonExpression
@@ -47,6 +48,30 @@ def generate_launch_description():
              parameters=[params_file], output='screen', condition=IfCondition(pipeline)),
     ]
 
+    # Enregistrement rosbag (ENF-05) : image compressee + toute la chaine, dans ~/rosbags/<mode>_<date>
+    declare_record = DeclareLaunchArgument(
+        'record', default_value='false', description='Enregistrer un rosbag dans ~/rosbags')
+    declare_bag_dir = DeclareLaunchArgument(
+        'bag_dir', default_value=os.path.expanduser('~/rosbags'), description='Dossier des rosbags')
+
+    def start_recording(context):
+        if LaunchConfiguration('record').perform(context) != 'true':
+            return []
+        sim_mode = mode.perform(context) == 'sim'
+        image = '/camera/image_raw' if sim_mode else '/image_raw'
+        camera_info = '/camera/camera_info' if sim_mode else '/camera_info'
+        topics = [image + '/compressed', camera_info, '/scan', '/odom', '/tf', '/tf_static',
+                  '/detections', '/target', '/cmd_vel', '/follower/enable']
+        if sim_mode:
+            topics += ['/ball/cmd_vel']  # pas /clock : 'ros2 bag play --clock' la regenere
+        name = f"{mode.perform(context)}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+        output = os.path.join(LaunchConfiguration('bag_dir').perform(context), name)
+        os.makedirs(os.path.dirname(output), exist_ok=True)
+        return [
+            LogInfo(msg=f'Enregistrement rosbag : {output}'),
+            ExecuteProcess(cmd=['ros2', 'bag', 'record', '-o', output] + topics, output='screen'),
+        ]
+
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(pkg_share, 'launch', 'sim.launch.py')),
         launch_arguments={'gui': gui}.items(),
@@ -54,8 +79,9 @@ def generate_launch_description():
     )
 
     real_info = LogInfo(
-        msg='mode:=real : lancer sur le robot `ros2 launch turtlebot3_bringup robot.launch.py` '
-            'et le driver de la webcam (usb_cam). Meme ROS_DOMAIN_ID sur le robot et le laptop.',
+        msg='mode:=real : sur le robot, lancer `ros2 launch turtlebot3_bringup robot.launch.py` et '
+            '`ros2 launch tb_bringup robot_camera.launch.py` (webcam). Meme ROS_DOMAIN_ID partout. '
+            'Le suivi demarre desactive : `ros2 run tb_control estop_keyboard`, touche g.',
         condition=IfCondition(EqualsSubstitution(mode, 'real')),
     )
 
@@ -64,8 +90,11 @@ def generate_launch_description():
         declare_gui,
         declare_pipeline,
         declare_joystick,
+        declare_record,
+        declare_bag_dir,
         LogInfo(msg=['Parametres : ', params_file]),
         sim,
         real_info,
         ball_joystick,
+        OpaqueFunction(function=start_recording),
     ] + pipeline_nodes)
