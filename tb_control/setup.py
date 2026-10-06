@@ -16,7 +16,6 @@ setup(
     maintainer_email='herch4515@gmail.com',
     description='Asservissement visuel (follower_controller) et watchdog de securite',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'follower_controller = tb_control.follower_controller:main',

@@ -28,8 +28,15 @@ def generate_launch_description():
         'pipeline', default_value='true',
         description='Lancer la chaine detection -> cible -> commande')
 
-    # Parametres de tous les nodes de la chaine : config/sim.yaml ou config/real.yaml
+    target = LaunchConfiguration('target')
+    declare_target = DeclareLaunchArgument(
+        'target', default_value='person', choices=['person', 'ball'],
+        description='person : YOLO + distance LiDAR ; ball : couleur HSV + distance par la bbox')
+
+    # Parametres de la chaine : config/<mode>.yaml (commun), puis config/target_<cible>.yaml (detection),
+    # le second completant le premier.
     params_file = PathJoinSubstitution([pkg_share, 'config', [mode, '.yaml']])
+    target_file = PathJoinSubstitution([pkg_share, 'config', ['target_', target, '.yaml']])
 
     joystick = LaunchConfiguration('joystick')
     declare_joystick = DeclareLaunchArgument(
@@ -41,9 +48,9 @@ def generate_launch_description():
 
     pipeline_nodes = [
         Node(package='tb_perception', executable='detector_node',
-             parameters=[params_file], output='screen', condition=IfCondition(pipeline)),
+             parameters=[params_file, target_file], output='screen', condition=IfCondition(pipeline)),
         Node(package='tb_tracking', executable='target_selector_node',
-             parameters=[params_file], output='screen', condition=IfCondition(pipeline)),
+             parameters=[params_file, target_file], output='screen', condition=IfCondition(pipeline)),
         Node(package='tb_control', executable='follower_controller',
              parameters=[params_file], output='screen', condition=IfCondition(pipeline)),
     ]
@@ -89,10 +96,11 @@ def generate_launch_description():
         declare_mode,
         declare_gui,
         declare_pipeline,
+        declare_target,
         declare_joystick,
         declare_record,
         declare_bag_dir,
-        LogInfo(msg=['Parametres : ', params_file]),
+        LogInfo(msg=['Parametres : ', params_file, ' + ', target_file]),
         sim,
         real_info,
         ball_joystick,

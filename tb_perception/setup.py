@@ -16,7 +16,6 @@ setup(
     maintainer_email='herch4515@gmail.com',
     description='Detection de personnes (detector_node : backends YOLO et couleur HSV)',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'detector_node = tb_perception.detector_node:main',

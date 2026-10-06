@@ -1,19 +1,25 @@
 """detector_node : image -> /detections (vision_msgs/Detection2DArray).
 
-Backends : 'color' (HSV, Phase 1). Le backend 'yolo' arrive en Phase 2.
+Backends : 'color' (HSV, Phase 1) et 'yolo' (personnes, Phase 2).
 Le header de l'image d'origine est recopie tel quel (ENF-01).
 """
+
+import time
 
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CompressedImage, Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
 from tb_perception.color_detector import ColorDetector
+
+# File d'attente de 1 image : si le detecteur est plus lent que la camera, il traite toujours
+# l'image la plus recente au lieu d'accumuler du retard (meme probleme que le buffer de la webcam).
+LATEST_IMAGE_QOS = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 class DetectorNode(Node):
@@ -37,8 +43,22 @@ class DetectorNode(Node):
                 min_area=self.declare_parameter('min_area', 40.0).value,
                 max_detections=self.declare_parameter('max_detections', 1).value,
             )
+        elif backend == 'yolo':
+            from tb_perception.yolo_detector import YoloDetector
+            self.detector = YoloDetector(
+                model=self.declare_parameter('model', 'yolo26n.pt').value,
+                weights_dir=self.declare_parameter('weights_dir', '~/.cache/person_tracking').value,
+                imgsz=self.declare_parameter('imgsz', 640).value,
+                conf_threshold=self.declare_parameter('conf_threshold', 0.4).value,
+                class_ids=self.declare_parameter('class_ids', [0]).value,
+                device=self.declare_parameter('device', 'cpu').value,
+                max_detections=self.declare_parameter('max_detections', 10).value,
+                num_threads=self.declare_parameter('num_threads', 3).value,
+            )
         else:
-            raise ValueError(f"backend inconnu : '{backend}' (backends disponibles : color)")
+            raise ValueError(f"backend inconnu : '{backend}' (backends disponibles : color, yolo)")
+        self.inference_ms = []
+        self.create_timer(5.0, self.report_speed)
 
         self.bridge = CvBridge()
         self.pub = self.create_publisher(Detection2DArray, 'detections', 10)
@@ -46,10 +66,10 @@ class DetectorNode(Node):
 
         if transport == 'compressed':
             self.create_subscription(
-                CompressedImage, image_topic + '/compressed', self.on_compressed, qos_profile_sensor_data)
+                CompressedImage, image_topic + '/compressed', self.on_compressed, LATEST_IMAGE_QOS)
             self.get_logger().info(f'Ecoute {image_topic}/compressed, backend {backend}')
         else:
-            self.create_subscription(Image, image_topic, self.on_image, qos_profile_sensor_data)
+            self.create_subscription(Image, image_topic, self.on_image, LATEST_IMAGE_QOS)
             self.get_logger().info(f'Ecoute {image_topic}, backend {backend}')
 
     def on_image(self, msg):
@@ -61,7 +81,9 @@ class DetectorNode(Node):
             self.process(image, msg.header)
 
     def process(self, image, header):
+        start = time.perf_counter()
         detections = self.detector.detect(image)
+        self.inference_ms.append((time.perf_counter() - start) * 1000.0)
 
         out = Detection2DArray()
         out.header = header
@@ -89,6 +111,14 @@ class DetectorNode(Node):
             debug = self.bridge.cv2_to_imgmsg(image, 'bgr8')
             debug.header = header
             self.debug_pub.publish(debug)
+
+    def report_speed(self):
+        if not self.inference_ms:
+            return
+        values = sorted(self.inference_ms)
+        self.inference_ms = []
+        median = values[len(values) // 2]
+        self.get_logger().info(f'Detection : mediane {median:.0f} ms/image, {len(values) / 5.0:.1f} images/s traitees')
 
 
 def main(args=None):

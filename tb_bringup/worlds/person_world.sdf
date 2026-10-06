@@ -2,7 +2,7 @@
 <!--
   Monde de test pour le suivi de personne.
   Robot spawn a l'origine, oriente vers +x. Une personne (actor) marche en boucle
-  sur un rectangle 1 m x 2 m situe entre 2.5 et 3.5 m devant le robot, a ~0.4 m/s.
+  sur un rectangle 1 m x 2 m situe entre 2.5 et 3.5 m devant le robot, a ~0.16 m/s.
   Le robot reste immobile en Phase 0 : la personne doit rester dans le champ de la camera.
 -->
 <sdf version="1.9">
@@ -119,17 +119,18 @@
         <loop>true</loop>
         <delay_start>0.0</delay_start>
         <auto_start>true</auto_start>
-        <!-- Rectangle (2.5,-1) -> (2.5,1) -> (3.5,1) -> (3.5,-1), ~0.4 m/s, 1 s par virage -->
+        <!-- Rectangle (2.5,-1) -> (2.5,1) -> (3.5,1) -> (3.5,-1), ~0.16 m/s (marche lente, hypothese du CdC ;
+             le robot est limite a 0.15 m/s), 2.5 s par virage -->
         <trajectory id="0" type="walk">
-          <waypoint><time>0.0</time><pose>2.5 -1.0 1.0 0 0 1.5708</pose></waypoint>
-          <waypoint><time>5.0</time><pose>2.5 1.0 1.0 0 0 1.5708</pose></waypoint>
-          <waypoint><time>6.0</time><pose>2.5 1.0 1.0 0 0 0</pose></waypoint>
-          <waypoint><time>8.5</time><pose>3.5 1.0 1.0 0 0 0</pose></waypoint>
-          <waypoint><time>9.5</time><pose>3.5 1.0 1.0 0 0 -1.5708</pose></waypoint>
-          <waypoint><time>14.5</time><pose>3.5 -1.0 1.0 0 0 -1.5708</pose></waypoint>
-          <waypoint><time>15.5</time><pose>3.5 -1.0 1.0 0 0 3.1416</pose></waypoint>
-          <waypoint><time>18.0</time><pose>2.5 -1.0 1.0 0 0 3.1416</pose></waypoint>
-          <waypoint><time>19.0</time><pose>2.5 -1.0 1.0 0 0 4.7124</pose></waypoint>
+          <waypoint><time>0</time><pose>2.5 -1.0 1.0 0 0 1.5708</pose></waypoint>
+          <waypoint><time>12.5</time><pose>2.5 1.0 1.0 0 0 1.5708</pose></waypoint>
+          <waypoint><time>15</time><pose>2.5 1.0 1.0 0 0 0</pose></waypoint>
+          <waypoint><time>21.25</time><pose>3.5 1.0 1.0 0 0 0</pose></waypoint>
+          <waypoint><time>23.75</time><pose>3.5 1.0 1.0 0 0 -1.5708</pose></waypoint>
+          <waypoint><time>36.25</time><pose>3.5 -1.0 1.0 0 0 -1.5708</pose></waypoint>
+          <waypoint><time>38.75</time><pose>3.5 -1.0 1.0 0 0 3.1416</pose></waypoint>
+          <waypoint><time>45</time><pose>2.5 -1.0 1.0 0 0 3.1416</pose></waypoint>
+          <waypoint><time>47.5</time><pose>2.5 -1.0 1.0 0 0 4.7124</pose></waypoint>
         </trajectory>
       </script>
     </actor>

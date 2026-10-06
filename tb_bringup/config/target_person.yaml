@@ -1,0 +1,23 @@
+# Cible = personne (Phase 2). Charge apres sim.yaml / real.yaml par : bringup.launch.py target:=person
+detector_node:
+  ros__parameters:
+    backend: yolo
+    class_id: person
+    model: yolo26n.pt         # telecharge au premier lancement dans weights_dir
+    weights_dir: ~/.cache/person_tracking
+    imgsz: 640                # 320 : 2x plus rapide, mais rate les jambes seules (mesure en sim)
+    conf_threshold: 0.4
+    class_ids: [0]            # COCO : 0 = personne
+    device: cpu               # pas de pilote NVIDIA sur le laptop ; 'cuda:0' sinon
+    num_threads: 3            # CPU : 3 threads = 95 ms/image stable avec Gazebo (4 : instable, jusqu'a 300 ms)
+    max_detections: 10
+
+target_selector_node:
+  ros__parameters:
+    # La personne est coupee par le haut de l'image : la hauteur de la bbox ne donne pas la distance.
+    # On prend les rayons du LiDAR dans la direction de la personne (fusion camera-LiDAR, EF-09).
+    distance_method: lidar
+    lidar_sector_fraction: 0.25   # centre de la bbox (le tronc, les jambes)
+    lidar_sector_min_deg: 1.5
+    scan_max_age: 0.5             # s
+    lost_timeout: 2.0

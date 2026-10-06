@@ -29,7 +29,6 @@ setup(
     maintainer_email='herch4515@gmail.com',
     description='Launch files, configs sim/real, monde Gazebo avec personne et modele burger_cam',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'ball_joystick = tb_bringup.ball_joystick:main',

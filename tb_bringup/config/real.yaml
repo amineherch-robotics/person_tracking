@@ -10,22 +10,12 @@
     cmd_vel_topic: /cmd_vel
     base_frame: base_footprint
 
-# --- Phase 1 : detection couleur d'une balle de tennis (jaune-vert fluo, 6.7 cm) ---
-detector_node:
-  ros__parameters:
-    backend: color
-    class_id: tennis_ball
-    # A regler sur des images reelles (eclairage) : voir docs/rapport_avancement.md
-    # [h_min, s_min, v_min, h_max, s_max, v_max] (H OpenCV 0-180), plusieurs intervalles possibles
-    hsv_ranges: [25, 80, 100, 45, 255, 255]
-    min_area: 40.0            # px ; balle de 6.7 cm a 2 m ~ 180 px
-    max_detections: 1
+# Detection et distance : voir target_person.yaml / target_ball.yaml (argument target:= du launch)
 
+# Camera du robot non calibree : intrinseques deduites du champ de vision
 target_selector_node:
   ros__parameters:
-    object_height: 0.067      # m, diametre d'une balle de tennis (6.54 a 6.86 cm)
-    lost_timeout: 2.0
-    camera_hfov: 1.2217       # rad, utilise si la webcam n'est pas calibree
+    camera_hfov: 1.2217       # rad, a mesurer sur la webcam du robot
 
 follower_controller:
   ros__parameters:

@@ -1,0 +1,17 @@
+# Cible = balle de tennis (Phase 1). Charge apres sim.yaml / real.yaml par : bringup.launch.py target:=ball
+detector_node:
+  ros__parameters:
+    backend: color
+    class_id: tennis_ball
+    # Mesure en sim : balle H 32-34 ; t-shirt de la personne H 50-59, V <= 102 ; boite H 11-17.
+    # En reel : a regler avec hsv_tuner.
+    # [h_min, s_min, v_min, h_max, s_max, v_max] (H OpenCV 0-180), plusieurs intervalles possibles
+    hsv_ranges: [25, 80, 100, 45, 255, 255]
+    min_area: 40.0            # px ; balle de 6.7 cm a 2 m ~ 180 px
+    max_detections: 1
+
+target_selector_node:
+  ros__parameters:
+    distance_method: bbox     # taille connue de la balle -> distance par la hauteur de la bbox
+    object_height: 0.067      # m, diametre d'une balle de tennis
+    lost_timeout: 2.0         # s (EF-04 / EF-07)

@@ -16,7 +16,6 @@ setup(
     maintainer_email='herch4515@gmail.com',
     description='Tracking SORT from scratch (lib sans dependance ROS), tracker_node, target_selector_node',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'target_selector_node = tb_tracking.target_selector_node:main',
