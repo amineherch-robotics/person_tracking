@@ -116,7 +116,7 @@ Légende : ✅ fait · 🟡 partiel · ⏳ en cours · ⬜ pas commencé
 **Ce qui a été fait**
 
 - **Branches `jazzy` partout.** `DynamixelSDK` et `turtlebot3` étaient sur `humble`. Passage sur `jazzy`, recompilation des 20 packages du workspace. Côté robot, `turtlebot3_node` attend bien `TwistStamped` sur `/cmd_vel`, comme notre contrôleur.
-- **Recul en option.** Nouveau paramètre `max_reverse` du contrôleur, **désactivé par défaut** (0,0). Avec par exemple 0,05, le robot recule lentement quand la cible est trop proche. L'arrêt sous 0,5 m (SEC-04) reste prioritaire. Trois tests ajoutés (18 au total).
+- **Recul en option.** Nouveau paramètre `max_reverse` du contrôleur, **désactivé par défaut** (0,0). Avec par exemple 0,05, le robot recule lentement quand la cible est trop proche. L'arrêt sous 0,5 m (SEC-04) reste prioritaire. Deux tests ajoutés (18 au total).
 - **Outil de réglage HSV** (`ros2 run tb_perception hsv_tuner`) : fenêtre avec l'image, le masque et des curseurs ; la touche `s` affiche la ligne à copier dans le YAML. Fonctionne sur l'image brute (simulation) ou compressée (robot).
 - **Enregistrement rosbag** (`record:=true`) : image compressée et toute la chaîne, dans `~/rosbags/<mode>_<date>/` (format mcap).
 - **Webcam du robot** : `config/usb_cam.yaml` (640×480, 15 images/s, MJPEG) et `launch/robot_camera.launch.py`, à lancer sur le Raspberry Pi. Le ROBOTIS `camera.launch.py` vise la caméra Pi (libcamera), pas une webcam USB.
