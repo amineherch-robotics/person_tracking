@@ -22,3 +22,10 @@ bags/
 *.mp4
 *.webm
 docs/*.pdf
+
+# Rapport d'avancement : prive, garde seulement en local (pas partage sur GitHub)
+docs/rapport_avancement.md
+docs/build_pdf.py
+# Images du rapport (et du cahier des charges) : seules celles du README sont versionnees
+docs/img/*
+!docs/img/demo_partie2_occlusion.gif

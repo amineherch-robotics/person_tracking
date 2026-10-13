@@ -7,19 +7,19 @@ Chaîne : webcam → détection YOLO26n → suivi multi-personnes ByteTrack (un 
 
 *Simulation Gazebo (×2), fenêtre de choix : la cible est la personne verte (ID 3) ; la rouge passe devant la caméra, la violette croise la cible ; l'ID 3 reste la cible.*
 
-> État : **en simulation**, le robot détecte les personnes, leur donne un ID et une couleur de vêtements ; l'utilisateur clique sur celle à suivre ; la cible est retrouvée par sa couleur si elle revient sous un autre ID. Le robot suit aussi une balle de tennis (`target:=ball`, Phase 1). Test sur robot réel à venir.
+> État : **en simulation**, le robot détecte les personnes, leur donne un ID et une couleur de vêtements ; l'utilisateur clique sur celle à suivre ; une personne cachée ou sortie de l'image **garde son ID** quand elle revient, et le robot tourne sur place pour chercher une cible perdue. Le robot suit aussi une balle de tennis (`target:=ball`, Phase 1). Test sur robot réel à venir.
 
 ## Packages
 
 | Package | Type | Contenu |
 |---|---|---|
 | `tb_interfaces` | ament_cmake | Messages `Track`, `TrackArray`, `TargetState` |
-| `tb_perception` | ament_python | `detector_node` : YOLO26n + ByteTrack (Ultralytics) ou couleur HSV ; couleur des vêtements par ID |
+| `tb_perception` | ament_python | `detector_node` : YOLO26n + ByteTrack (Ultralytics) ou couleur HSV ; couleur des vêtements (`clothing_color.py`) ; ID de personne stable après une perte (`identity.py`) |
 | `tb_tracking` | ament_python | `target_selector_node` ; libs sans ROS : verrouillage et ré-identification (`target_lock.py`), géométrie (`target_geometry.py`) |
-| `tb_control` | ament_python | `follower_controller` (contrôleur P, watchdog, limites), `estop_keyboard` |
+| `tb_control` | ament_python | `follower_controller` (contrôleur P, recherche en tournant, watchdog, limites), `estop_keyboard` |
 | `tb_bringup` | ament_python | Launch files, configs, monde Gazebo, modèle `tb3_burger_cam`, fenêtre `target_chooser`, joystick de la balle |
 
-Architecture et topics : [docs/architecture.md](docs/architecture.md). Suivi du projet : [docs/rapport_avancement.md](docs/rapport_avancement.md).
+Architecture et topics : [docs/architecture.md](docs/architecture.md).
 
 ## Prérequis
 
@@ -39,7 +39,7 @@ Architecture et topics : [docs/architecture.md](docs/architecture.md). Suivi du 
 
 ```bash
 cd ~/turtlebot3_ws/src
-git clone <url-du-repo> person_tracking
+git clone https://github.com/amineherch-robotics/person_tracking.git
 cd ~/turtlebot3_ws
 rosdep install --from-paths src --ignore-src -y
 colcon build --symlink-install
@@ -169,7 +169,7 @@ ros2 launch tb_bringup bringup.launch.py mode:=real record:=true
 ros2 run tb_control estop_keyboard                           # g = démarrer le suivi, espace = arrêt
 ```
 
-En réel, le suivi démarre **désactivé** : il faut appuyer sur `g`. Avant le premier essai : zone dégagée, une personne qui surveille le robot (SEC-06), et test du watchdog en coupant le WiFi.
+En réel, le suivi démarre **désactivé** : il faut appuyer sur `g`. La recherche en tournant est aussi désactivée en réel (`search_angular: 0.0` dans `real.yaml`) tant qu'elle n'a pas été testée sur le robot. Avant le premier essai : zone dégagée, une personne qui surveille le robot (SEC-06), et test du watchdog en coupant le WiFi.
 
 Pour que la latence affichée soit juste, les horloges du robot et du laptop doivent être synchronisées (`chrony`, `chronyc tracking`).
 
@@ -178,15 +178,6 @@ Pour que la latence affichée soit juste, les horloges du robot et du laptop doi
 ```bash
 cd ~/turtlebot3_ws/src/person_tracking
 for p in tb_perception tb_tracking tb_control tb_bringup; do (cd $p && python3 -m pytest -q test); done   # 57 tests
-```
-
-## Rapport
-
-Le suivi du projet est dans [docs/rapport_avancement.md](docs/rapport_avancement.md). Pour en faire un PDF (non versionné) :
-
-```bash
-sudo apt install python3-markdown      # une seule fois
-python3 docs/build_pdf.py              # -> docs/rapport_avancement.pdf (Chrome ou Chromium requis)
 ```
 
 ## Simulation
